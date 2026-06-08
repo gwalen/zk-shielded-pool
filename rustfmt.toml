@@ -1,0 +1,2 @@
+# avoid reduce unwanted wrapping (when not bigger than 100 characters)
+use_small_heuristics = "Max"

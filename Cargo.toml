@@ -1,0 +1,16 @@
+[package]
+name = "zk-shielded-pool"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+halo2-base = { version = "0.5.1", default-features = false, features = ["halo2-axiom", "display", "test-utils"] }
+halo2-ecc = { version = "0.5.1", default-features = false, features = ["halo2-axiom"] }
+rand = "0.8"
+
+# TODO: what are these? - do we need it
+[profile.dev]
+opt-level = 3
+debug = 1
+overflow-checks = true
+incremental = true
