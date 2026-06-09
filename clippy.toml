@@ -1,0 +1,2 @@
+# turn off warnings for new() without default constructor
+allow = ["clippy::new_without_default"]
