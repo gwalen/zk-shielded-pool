@@ -8,13 +8,13 @@ use halo2_base::{
 use hex_literal::hex;
 use pse_poseidon::Poseidon;
 
-/*
-Poseidon parameters (given by AI):
-  T = 3       state width
-  RATE = 2    two input elements absorbed per permutation
-  R_F = 8     full rounds
-  R_P = 57    partial rounds
-*/
+// *** Commitment reconstruction constraint ***
+
+// Poseidon parameters (given by AI):
+//   T = 3       state width
+//   RATE = 2    two input elements absorbed per permutation
+//   R_F = 8     full rounds
+//   R_P = 57    partial rounds
 const T: usize = 3;
 const RATE: usize = 2;
 const R_F: usize = 8;
@@ -26,6 +26,13 @@ const MAX_CHUNKS: usize = 3;
 pub struct PoseidonChip {
     gate: GateChip<Fr>,
 }
+
+/*
+TODO:
+Double hashing to prevent fake proof (with forged total_amount):
+H_user = Poseidon(s, 7.0, 2.0, 3.5, 1.5, A0, A1, A2, M=3)
+H = Poseidon(H_user, 7.0) -> calculated by program on-chain, a 7 to value taken directly from transaction
+*/
 
 impl PoseidonChip {
     pub fn new() -> Self {
