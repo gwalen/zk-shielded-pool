@@ -24,3 +24,6 @@ target
 
 # Private documents generate with AI
 docs-prv
+
+# Claude rules
+CLAUDE.md

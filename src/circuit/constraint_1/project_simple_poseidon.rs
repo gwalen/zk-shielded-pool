@@ -74,6 +74,8 @@ impl PoseidonChip {
     }
 }
 
+// TODO: dodaj range check dla chunks
+
 // Native rust implementation of Poseidon hash for tests verification
 fn poseidon_hash_native_rust(
     s: Fr,
@@ -191,7 +193,7 @@ mod tests {
     #[test]
     pub fn run_constraint_1_test_fail() {
         let k = 10; // domain size, max 2^k rows in execution trace
-    
+
         // private values used to calculate the hash
         let s = Fr::from(1234567890);
         let total_amount = Fr::from(7);
@@ -199,23 +201,23 @@ mod tests {
         let addr_hex: [u8; 32] =
             hex!("fc91f35435da1610a33bc390ba7f94227e0ac863b3c4ddf49349f0a8406114d3");
         let addresses = [addr_hex, addr_hex, addr_hex];
-    
+
         let addresses_fr: [Fr; MAX_CHUNKS] = addresses.map(convert_32bytes_to_fr);
-    
+
         let poseidon_hash = poseidon_hash_native_rust(s, total_amount, &chunks, &addresses_fr);
-    
+
         let mut builder =
             BaseCircuitBuilder::<Fr>::new(false).use_k(k as usize).use_instance_columns(1);
 
-        let fake_s = Fr::from(666);    
-    
+        let fake_s = Fr::from(666);
+
         build_poseidon_circuit(&mut builder, fake_s, total_amount, &chunks, &addresses_fr);
         // amount of rows reserved for blinding, 9 is value used in halo2 examples/tests
         builder.calculate_params(Some(9)); // TODO: this is magic number - for prod circuit it must be chosen consciously
-    
+
         // public values
         let instances = vec![vec![poseidon_hash]];
-    
+
         let verification_result = MockProver::run(k, &builder, instances).unwrap().verify();
         match &verification_result {
             Ok(()) => println!("Verification Successful"),
