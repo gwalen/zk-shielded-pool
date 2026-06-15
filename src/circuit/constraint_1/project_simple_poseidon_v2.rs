@@ -1,3 +1,4 @@
+use crate::circuit::utils::split_into_u64_limbs;
 use halo2_base::halo2_proofs::halo2curves::group::ff::PrimeField;
 use halo2_base::{
     AssignedValue, Context,
@@ -7,6 +8,7 @@ use halo2_base::{
         arithmetic::Field, dev::MockProver, dev::VerifyFailure, halo2curves::bn256::Fr,
     },
 };
+use hex_literal::hex;
 use pse_poseidon::Spec;
 use solana_poseidon::{Endianness, Parameters, hashv};
 
@@ -34,6 +36,10 @@ const SOLANA_POSEIDON_R_P: usize = 60;
 // Max length of the list of addresses and chunks.
 const MAX_CHUNKS: usize = 3;
 
+
+// ********************
+// Solana-compatible Poseidon hash for circuit building
+// ********************
 pub struct SolanaPoseidonChip {
     gate: GateChip<Fr>,
 }
@@ -221,6 +227,28 @@ fn commitment_inputs(
     ]
 }
 
+// ********************
+
+/// Convert 32 bytes pubkey to Fr using Poseidon hash by splitting the 32 bytes into 4 64-bit limbs and than hash them.
+/// Alternative: 
+///   Cheaper version of this conversion : Hash the whole 32bytes array and just take 254 bits that will fit in Fr (drop last two)
+//     - For that we need to drop last two bits from the hash and than convert to Fr
+//     -> Issue: collisions are possible, we lose part of and address
+fn convert_pubkey_32bytes_to_fr(bytes: [u8; 32]) -> Fr {
+    let limbs_as_fr: [Fr; 4] = split_into_u64_limbs(bytes).map(Fr::from);
+    // poseidon hash expects 4x32 bytes arrays as input so we have to convert Fr back to bytes : u64 -> Fr -> [u8; 32]
+    let limbs_as_arrays: [[u8; 32]; 4] = limbs_as_fr.each_ref().map(|l| l.to_repr());
+
+    let hash = hashv(
+        Parameters::Bn254X5,
+        Endianness::LittleEndian,
+        &limbs_as_arrays.each_ref().map(|l| l.as_slice()),
+    )
+    .unwrap();
+
+    fr_from_le_bytes(hash.to_bytes())
+}
+
 pub fn build_solana_poseidon_circuit(
     builder: &mut BaseCircuitBuilder<Fr>,
     s: Fr,
@@ -257,16 +285,24 @@ pub fn run_constraint_1_solana_poseidon_test_ok() -> Result<(), Vec<VerifyFailur
     let chunks = [Fr::from(2), Fr::from(2), Fr::from(3)];
     // Demo addresses are already field elements. Raw Solana pubkeys need a
     // separate, identical field-mapping step in both the circuit and program.
-    let addresses = [Fr::from(1001), Fr::from(1002), Fr::from(1003)];
+    let addr_hex: [u8; 32] =
+        hex!("fc91f35435da1610a33bc390ba7f94227e0ac863b3c4ddf49349f0a8406114d3");
+    let addresses = [addr_hex, addr_hex, addr_hex];
 
-    let poseidon_hash =
-        solana_poseidon_hash_native_rust(&commitment_inputs(s, total_amount, &chunks, &addresses));
+    let addresses_fr: [Fr; MAX_CHUNKS] = addresses.map(convert_pubkey_32bytes_to_fr);
+
+    let poseidon_hash = solana_poseidon_hash_native_rust(&commitment_inputs(
+        s,
+        total_amount,
+        &chunks,
+        &addresses_fr,
+    ));
     println!("Solana-compatible Poseidon hash: {:?}", poseidon_hash);
 
     let mut builder =
         BaseCircuitBuilder::<Fr>::new(false).use_k(k as usize).use_instance_columns(1);
 
-    build_solana_poseidon_circuit(&mut builder, s, total_amount, &chunks, &addresses);
+    build_solana_poseidon_circuit(&mut builder, s, total_amount, &chunks, &addresses_fr);
     builder.calculate_params(Some(9));
 
     let instances = vec![vec![poseidon_hash]];

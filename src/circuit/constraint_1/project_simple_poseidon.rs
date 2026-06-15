@@ -104,7 +104,7 @@ fn split_into_u64_limbs(bytes: [u8; 32]) -> [u64; 4] {
 
 // TODO: write cheaper version of this conversion : Hash the whole 32bytes array and just take 254 bits that will fit in Fr (drop last two)
 // sponge already does incremental ordered hashing, so I don't need to hand-roll the hashing chain
-fn convert_32bytes_to_fr(bytes: [u8; 32]) -> Fr {
+fn convert_pubkey_32bytes_to_fr(bytes: [u8; 32]) -> Fr {
     let limbs: [Fr; 4] = split_into_u64_limbs(bytes).map(Fr::from);
     let mut sponge = Poseidon::<Fr, T, RATE>::new(R_F, R_P);
     sponge.update(&limbs);
@@ -157,7 +157,7 @@ pub fn run_constraint_1_test_ok() -> Result<(), Vec<VerifyFailure>> {
         hex!("fc91f35435da1610a33bc390ba7f94227e0ac863b3c4ddf49349f0a8406114d3");
     let addresses = [addr_hex, addr_hex, addr_hex];
 
-    let addresses_fr: [Fr; MAX_CHUNKS] = addresses.map(convert_32bytes_to_fr);
+    let addresses_fr: [Fr; MAX_CHUNKS] = addresses.map(convert_pubkey_32bytes_to_fr);
 
     let poseidon_hash = poseidon_hash_native_rust(s, total_amount, &chunks, &addresses_fr);
     println!("Poseidon hash: {:?}", poseidon_hash);
@@ -202,7 +202,7 @@ mod tests {
             hex!("fc91f35435da1610a33bc390ba7f94227e0ac863b3c4ddf49349f0a8406114d3");
         let addresses = [addr_hex, addr_hex, addr_hex];
 
-        let addresses_fr: [Fr; MAX_CHUNKS] = addresses.map(convert_32bytes_to_fr);
+        let addresses_fr: [Fr; MAX_CHUNKS] = addresses.map(convert_pubkey_32bytes_to_fr);
 
         let poseidon_hash = poseidon_hash_native_rust(s, total_amount, &chunks, &addresses_fr);
 
