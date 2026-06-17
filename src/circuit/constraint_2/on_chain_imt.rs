@@ -3,7 +3,7 @@ use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
 use solana_poseidon::{Endianness, Parameters};
 
 use crate::circuit::{
-    constraint_2::imt_utils::{EMPTY_VALUE, generate_zero_values_for_levels},
+    constraint_2::imt_utils::{generate_zero_values_for_levels, poseidon_hash, EMPTY_VALUE, TREE_DEPTH_MAX},
     utils::{fr_from_le_bytes, fr_to_le_bytes},
 };
 
@@ -19,8 +19,6 @@ use crate::circuit::{
 // since the proof was made), the program rejects it — regenerate the proof against a more
 // recent root and resubmit.
 const ROOT_HISTORY_LENGTH: usize = 10;
-
-const TREE_DEPTH_MAX: usize = 20; // 1M leafs and total size of full tree  64MB (32 bytes per leaf)
 
 /// # Fields
 ///
@@ -39,12 +37,12 @@ const TREE_DEPTH_MAX: usize = 20; // 1M leafs and total size of full tree  64MB 
 /// - `next_leaf_idx` - Index of the next leaf to be inserted (0.. 2^TREE_DEPTH)
 ///   First level depth == 0 and amount of leafs at this level is 2^TREE_DEPTH
 struct OnChainImt<const TREE_DEPTH: usize> {
-    root: Fr,
-    frontiers: [Fr; TREE_DEPTH],
-    zero_values: [Fr; TREE_DEPTH],
-    roots_history: [Fr; ROOT_HISTORY_LENGTH],
-    last_root_idx: usize,
-    next_leaf_idx: usize,
+    pub root: Fr,
+    pub frontiers: [Fr; TREE_DEPTH],
+    pub zero_values: [Fr; TREE_DEPTH],
+    pub roots_history: [Fr; ROOT_HISTORY_LENGTH],
+    pub last_root_idx: usize,
+    pub next_leaf_idx: usize,
 }
 
 impl<const TREE_DEPTH: usize> OnChainImt<TREE_DEPTH> {
@@ -54,7 +52,7 @@ impl<const TREE_DEPTH: usize> OnChainImt<TREE_DEPTH> {
         // init tree values when tree is empty (no leaves inserted yet) -  but still need to be correct Merkle tree (hashing tree)
         let zero_values: [Fr; TREE_DEPTH] =
             generate_zero_values_for_levels(TREE_DEPTH).try_into().unwrap();
-        let root = Self::hash(zero_values[TREE_DEPTH - 1], zero_values[TREE_DEPTH - 1]);
+        let root = poseidon_hash(zero_values[TREE_DEPTH - 1], zero_values[TREE_DEPTH - 1]);
         let mut roots_history = [EMPTY_VALUE; ROOT_HISTORY_LENGTH];
         roots_history[0] = root;
         
@@ -82,9 +80,9 @@ impl<const TREE_DEPTH: usize> OnChainImt<TREE_DEPTH> {
             // go level up add calculate upper node value
             if is_left_leaf {
                 self.frontiers[current_level] = current_node_value;
-                current_node_value = Self::hash(current_node_value, self.zero_values[current_level])
+                current_node_value = poseidon_hash(current_node_value, self.zero_values[current_level])
             } else {
-                current_node_value = Self::hash(self.frontiers[current_level], current_node_value)
+                current_node_value = poseidon_hash(self.frontiers[current_level], current_node_value)
             };
             current_idx /= 2;
         }
@@ -103,16 +101,5 @@ impl<const TREE_DEPTH: usize> OnChainImt<TREE_DEPTH> {
         } else {
             self.last_root_idx += 1;
         }
-    }
-
-    fn hash(left: Fr, right: Fr) -> Fr {
-        let hash = solana_poseidon::hashv(
-            Parameters::Bn254X5,
-            Endianness::LittleEndian,
-            &[&fr_to_le_bytes(left), &fr_to_le_bytes(right)],
-        )
-        .unwrap();
-
-        fr_from_le_bytes(hash.to_bytes())
     }
 }

@@ -9,6 +9,9 @@ pub const Z_0: Fr = Fr::zero();
 // tree node value that was not updated yet 
 pub const EMPTY_VALUE: Fr = Fr::one();
 
+// 1M leafs and total size of full tree 64MB (32 bytes per leaf)
+pub const TREE_DEPTH_MAX: usize = 20;
+
 pub fn generate_zero_values_for_levels(tree_depth: usize) -> Vec<Fr> {
     // zero values for each level (except root level) 
     // Example for depth 3: 0 (leaf) -> 1 (level 1) -> 2 (level 2) -> 3 (root)
@@ -31,4 +34,15 @@ pub fn generate_zero_values_for_levels(tree_depth: usize) -> Vec<Fr> {
     }
 
     zero_values
+}
+
+pub fn poseidon_hash(left: Fr, right: Fr) -> Fr {
+    let hash = solana_poseidon::hashv(
+        Parameters::Bn254X5,
+        Endianness::LittleEndian,
+        &[&fr_to_le_bytes(left), &fr_to_le_bytes(right)],
+    )
+    .unwrap();
+
+    fr_from_le_bytes(hash.to_bytes())
 }
