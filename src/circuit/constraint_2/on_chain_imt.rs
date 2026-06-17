@@ -1,13 +1,8 @@
 use anyhow::{Error, Result};
 use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
-use solana_poseidon::{Endianness, Parameters};
-
 use crate::circuit::{
     constraint_2::imt_utils::{generate_zero_values_for_levels, poseidon_hash, EMPTY_VALUE, TREE_DEPTH_MAX},
-    utils::{fr_from_le_bytes, fr_to_le_bytes},
 };
-
-// const TREE_DEPTH: usize = 10;
 
 // This limits only how many deposit can happen in between you generate a proof for withdrawal
 // and actually sending the withdrawal transaction as each new deposit changes the root.
@@ -101,5 +96,96 @@ impl<const TREE_DEPTH: usize> OnChainImt<TREE_DEPTH> {
         } else {
             self.last_root_idx += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::circuit::constraint_2::off_chain_imt::OffChainImtBuilder;
+    // Leaf generator + snapshots are owned by the builder tests; we cross-check
+    // against the builder at runtime instead of duplicating constants.
+    use crate::circuit::constraint_2::off_chain_imt::tests::commitment;
+
+    // test_empty_root_matches_builder — OnChainImt::<3>::new().root == OffChainImtBuilder::new(3).root() | differential
+    #[test]
+    fn test_empty_root_matches_builder() {
+        let on_chain_imt = OnChainImt::<3>::new();
+        let off_chain_imt = OffChainImtBuilder::new(3);
+        assert_eq!(on_chain_imt.root, off_chain_imt.root());
+    }
+
+    // test_initial_state — next_leaf_idx==0, last_root_idx==0, roots_history[0]==root, rest EMPTY_VALUE | structural
+    #[test]
+    fn test_initial_state() {
+        let on_chain_imt = OnChainImt::<3>::new();
+        assert_eq!(on_chain_imt.next_leaf_idx, 0);
+        assert_eq!(on_chain_imt.last_root_idx, 0);
+        assert_eq!(on_chain_imt.roots_history[0], on_chain_imt.root);
+        for i in 1..ROOT_HISTORY_LENGTH {
+            assert_eq!(on_chain_imt.roots_history[i], EMPTY_VALUE);
+        }
+    }
+
+    // test_full_tree_matches_builder_stepwise — for each of 8 commitment(_) leaves: on_chain.insert(L) and builder.insert_leaf_lazy(L)+build_tree();
+    // assert roots equal after every insert | differential (covers all left/right branches, proves frontiers populated before read)
+    #[test]
+    fn test_full_tree_matches_builder_stepwise() {
+        let mut on_chain_imt = OnChainImt::<3>::new();
+        let mut off_chain_imt = OffChainImtBuilder::new(3);
+        for i in 1..=8u64 {
+            let leaf = commitment(i);
+            on_chain_imt.insert(leaf).unwrap();
+            off_chain_imt.insert_leaf_lazy(leaf).unwrap();
+            off_chain_imt.build_tree();
+            assert_eq!(on_chain_imt.root, off_chain_imt.root(), "root mismatch after {} inserts", i);
+        }
+    }
+
+    // test_tree_full — 9th insert → Err, state unchanged | error
+    #[test]
+    fn test_tree_full() {
+        let mut on_chain_imt = OnChainImt::<3>::new();
+        for i in 1..=8u64 {
+            on_chain_imt.insert(commitment(i)).unwrap();
+        }
+        let root_before = on_chain_imt.root;
+        let idx_before = on_chain_imt.next_leaf_idx;
+        assert!(on_chain_imt.insert(commitment(9)).is_err());
+        assert_eq!(on_chain_imt.root, root_before);
+        assert_eq!(on_chain_imt.next_leaf_idx, idx_before);
+    }
+
+    // test_next_leaf_idx_increments — 0→8 | structural
+    #[test]
+    fn test_next_leaf_idx_increments() {
+        let mut on_chain_imt = OnChainImt::<3>::new();
+        assert_eq!(on_chain_imt.next_leaf_idx, 0);
+        for i in 1..=8u64 {
+            on_chain_imt.insert(commitment(i)).unwrap();
+            assert_eq!(on_chain_imt.next_leaf_idx, i as usize);
+        }
+    }
+
+    // test_roots_history_records_each_root — roots_history[last_root_idx]==root after each insert (no wrap, by design at depth 3) | invariant
+    #[test]
+    fn test_roots_history_records_each_root() {
+        let mut on_chain_imt = OnChainImt::<3>::new();
+        for i in 1..=8u64 {
+            on_chain_imt.insert(commitment(i)).unwrap();
+            assert_eq!(on_chain_imt.roots_history[on_chain_imt.last_root_idx], on_chain_imt.root);
+        }
+    }
+
+    // test_insert_deterministic — two trees, same leaves → same root | invariant
+    #[test]
+    fn test_insert_deterministic() {
+        let mut on_chain_imt_a = OnChainImt::<3>::new();
+        let mut on_chain_imt_b = OnChainImt::<3>::new();
+        for i in 1..=6u64 {
+            on_chain_imt_a.insert(commitment(i)).unwrap();
+            on_chain_imt_b.insert(commitment(i)).unwrap();
+        }
+        assert_eq!(on_chain_imt_a.root, on_chain_imt_b.root);
     }
 }

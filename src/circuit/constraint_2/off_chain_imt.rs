@@ -103,3 +103,226 @@ impl OffChainImtBuilder {
         (self.tree_depth - depth_from_root) as usize
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use crate::circuit::constraint_2::imt_utils::poseidon_hash;
+    use crate::circuit::utils::{fr_from_le_bytes, fr_to_le_bytes};
+    use solana_poseidon::{Endianness, Parameters};
+
+    // ---------------------------------------------------------------------
+    // Snapshot of the depth-3 reference tree (leaves = commitment(1..=8)).
+    // These are the single source of truth for IMT expected values: the
+    // on-chain tests cross-check against this builder at runtime instead of
+    // duplicating constants. Regenerate only if the hash impl legitimately
+    // changes (a change here that you didn't intend means something broke).
+    // ---------------------------------------------------------------------
+    pub(crate) const Z0_HEX: &str =
+        "0x0000000000000000000000000000000000000000000000000000000000000000";
+    pub(crate) const Z1_HEX: &str =
+        "0x2098f5fb9e239eab3ceac3f27b81e481dc3124d55ffed523a839ee8446b64864";
+    pub(crate) const Z2_HEX: &str =
+        "0x1069673dcdb12263df301a6ff584a7ec261a44cb9dc68df067a4774460b1f1e1";
+    pub(crate) const EMPTY_ROOT_HEX: &str =
+        "0x18f43331537ee2af2e3d758d50f72106467c6eea50371dd528d57eb2b856d238";
+    pub(crate) const SINGLE_ROOT_HEX: &str =
+        "0x07eac97f63c362dc3151636e70236b1528a2b9ed70314ccab77a590cd7da7463";
+    pub(crate) const PARTIAL3_ROOT_HEX: &str =
+        "0x102120bf2b43d7898df1064785e27a9a6f871039b371cf7be59588de6ddb8c52";
+    // Full depth-3 tree, all 15 nodes in array order (index 0 == root).
+    pub(crate) const FULL_NODES: [&str; 15] = [
+        "0x1c941927a5dfda40573b22729c1c627c0ae71b7e68dd1bd873d533076e009829",
+        "0x0ae35a1d69b5edf22c9c8f3c516e71844d314d2783e6be55ecbb4041dd0f4da8",
+        "0x2e2649c7b46d9873f008c516182b540108b41ccf412019564403fa3d9ae3c112",
+        "0x163d03f7550746164d022ae803e93c1abe652ec202c073b84e75e737deb4df56",
+        "0x23144c1e7794f62515c2ccbaee3076d2e40b673fcba5da8a6457387e054068e0",
+        "0x2653538c46d11b9ac939edcd686ec116d66ef466b8542e664f21984837fd99ce",
+        "0x06070d18c13133fed911ae4554348a984a42bb12d57314daeea7c45820c4feb5",
+        "0x29176100eaa962bdc1fe6c654d6a3c130e96a4d1168b33848b897dc502820133",
+        "0x131d73cf6b30079aca0dff6a561cd0ee50b540879abe379a25a06b24bde2bebd",
+        "0x0d4e4d24b890fe6799be4cf57ad13078ec0fbaa9fe91423ba8bbd0c2d7043bd4",
+        "0x15e36f4ff92e2211fa8ed9f7af707f6c8c0f1442252a85150d2b8d2038890dfc",
+        "0x2a267e27e712412e8eefec1e174ce85b1af2f2d9a8014fa4dc723abb4d27ef7d",
+        "0x094b8e7acd789372d446e21dcc80162aba6c1923ae3b9a30702f64f0aea70295",
+        "0x0f9cebf54307bbb3646866aa15d2cd6e961caea77048b87f4261b7636240254e",
+        "0x135ec460f4a519cb3a7eb19a4e3486c6d25bad46c5b7af029af91009534c3be4",
+    ];
+
+    /// Realistic leaf value: in practice every leaf is a Poseidon commitment
+    /// hash, so we hash a single `Fr` seed. The result is a 32-byte field
+    /// element, so it is never `Z_0`/`EMPTY_VALUE` (0/1) and passes the
+    /// builder's leaf-validity check. Shared with the on-chain tests.
+    pub(crate) fn commitment(seed: u64) -> Fr {
+        let h = solana_poseidon::hash(
+            Parameters::Bn254X5,
+            Endianness::LittleEndian,
+            &fr_to_le_bytes(Fr::from(seed)),
+        )
+        .unwrap();
+        fr_from_le_bytes(h.to_bytes())
+    }
+
+    fn hex(f: Fr) -> String {
+        format!("{:?}", f)
+    }
+
+    // test_layout_depth3 — first_leaf_idx==7, nodes.len()==15, next_free_leaf_idx==7 after new(3) | structural
+    #[test]
+    fn test_layout_depth3() {
+        let builder = OffChainImtBuilder::new(3);
+        assert_eq!(builder.first_leaf_idx, 7);
+        assert_eq!(builder.nodes.len(), 15);
+        assert_eq!(builder.next_free_leaf_idx, 7);
+    }
+
+    // test_calculate_level — idx 0→3, 1–2→2, 3–6→1, 7–14→0 (pins the ilog2 math) | structural
+    #[test]
+    fn test_calculate_level() {
+        let builder = OffChainImtBuilder::new(3);
+        assert_eq!(builder.calculate_level(0), 3);
+        for i in 1..=2 {
+            assert_eq!(builder.calculate_level(i), 2);
+        }
+        for i in 3..=6 {
+            assert_eq!(builder.calculate_level(i), 1);
+        }
+        for i in 7..=14 {
+            assert_eq!(builder.calculate_level(i), 0);
+        }
+    }
+
+    // test_zero_values_snapshot — zero_values == [z0, z1, z2] | snapshot
+    #[test]
+    fn test_zero_values_snapshot() {
+        let zv = generate_zero_values_for_levels(3);
+        assert_eq!(hex(zv[0]), Z0_HEX);
+        assert_eq!(hex(zv[1]), Z1_HEX);
+        assert_eq!(hex(zv[2]), Z2_HEX);
+    }
+
+    // test_empty_root_snapshot — empty depth-3 root() matches snapshot, and == poseidon_hash(z2,z2) | snapshot
+    #[test]
+    fn test_empty_root_snapshot() {
+        let builder = OffChainImtBuilder::new(3);
+        assert_eq!(hex(builder.root()), EMPTY_ROOT_HEX);
+        let zv = generate_zero_values_for_levels(3);
+        assert_eq!(builder.root(), poseidon_hash(zv[2], zv[2]));
+    }
+
+    // test_single_leaf_snapshot — insert one commitment, build_tree, root matches snapshot; path siblings resolve to zero_values | snapshot
+    #[test]
+    fn test_single_leaf_snapshot() {
+        let zv = generate_zero_values_for_levels(3);
+        let mut builder = OffChainImtBuilder::new(3);
+        builder.insert_leaf_lazy(commitment(1)).unwrap();
+        builder.build_tree();
+        assert_eq!(hex(builder.root()), SINGLE_ROOT_HEX);
+        // only leaf 0 (node 7) is set; the rest resolve to the leaf-level zero value Z_0
+        assert_eq!(builder.nodes[7], commitment(1));
+        for i in 8..=14 {
+            assert_eq!(builder.nodes[i], zv[0]);
+        }
+    }
+
+    // test_full_tree_snapshot — insert 8 commitment leaves, build_tree, assert entire 15-node nodes vector matches snapshot array | snapshot (strong)
+    #[test]
+    fn test_full_tree_snapshot() {
+        let mut builder = OffChainImtBuilder::new(3);
+        for i in 1..=8 {
+            builder.insert_leaf_lazy(commitment(i)).unwrap();
+        }
+        builder.build_tree();
+        for (i, expected) in FULL_NODES.iter().enumerate() {
+            assert_eq!(hex(builder.nodes[i]), *expected, "node {}", i);
+        }
+    }
+
+    // test_partial_tree_zero_substitution — insert 3 leaves, build, root matches snapshot (exercises node() zero-fill) | snapshot
+    #[test]
+    fn test_partial_tree_zero_substitution() {
+        let zv = generate_zero_values_for_levels(3);
+        let mut builder = OffChainImtBuilder::new(3);
+        for i in 1..=3 {
+            builder.insert_leaf_lazy(commitment(i)).unwrap();
+        }
+        builder.build_tree();
+        assert_eq!(hex(builder.root()), PARTIAL3_ROOT_HEX);
+        // leaves 3..7 (nodes 10..14) were never inserted -> zero-filled with Z_0
+        for i in 10..=14 {
+            assert_eq!(builder.nodes[i], zv[0]);
+        }
+    }
+
+    // test_insert_rejects_zero_and_one — insert_leaf_lazy(Z_0) and (EMPTY_VALUE) return Err | error
+    #[test]
+    fn test_insert_rejects_zero_and_one() {
+        let mut builder = OffChainImtBuilder::new(3);
+        assert!(builder.insert_leaf_lazy(Z_0).is_err());
+        assert!(builder.insert_leaf_lazy(EMPTY_VALUE).is_err());
+    }
+
+    // test_tree_full — 9th insert on depth 3 → Err("Tree is full") | error
+    #[test]
+    fn test_tree_full() {
+        let mut builder = OffChainImtBuilder::new(3);
+        for i in 1..=8 {
+            builder.insert_leaf_lazy(commitment(i)).unwrap();
+        }
+        assert!(builder.insert_leaf_lazy(commitment(9)).is_err());
+    }
+
+    // test_build_tree_idempotent — build_tree() twice → same root | invariant
+    #[test]
+    fn test_build_tree_idempotent() {
+        let mut builder = OffChainImtBuilder::new(3);
+        for i in 1..=5 {
+            builder.insert_leaf_lazy(commitment(i)).unwrap();
+        }
+        builder.build_tree();
+        let r1 = builder.root();
+        builder.build_tree();
+        assert_eq!(builder.root(), r1);
+    }
+}
+
+// Throwaway helper to (re)generate the depth-3 snapshot constants used in the
+// tests above. Run with: `cargo test print_snapshots -- --nocapture` and paste
+// the printed values into the snapshot consts. Not an assertion test.
+#[cfg(test)]
+mod capture {
+    use super::tests::commitment;
+    use super::*;
+
+    #[test]
+    fn print_snapshots() {
+        let zv = generate_zero_values_for_levels(3);
+        println!("Z0 = {:?}", zv[0]);
+        println!("Z1 = {:?}", zv[1]);
+        println!("Z2 = {:?}", zv[2]);
+
+        let empty = OffChainImtBuilder::new(3);
+        println!("EMPTY_ROOT = {:?}", empty.root());
+
+        let mut single = OffChainImtBuilder::new(3);
+        single.insert_leaf_lazy(commitment(1)).unwrap();
+        single.build_tree();
+        println!("SINGLE_ROOT = {:?}", single.root());
+
+        let mut partial = OffChainImtBuilder::new(3);
+        for i in 1..=3 {
+            partial.insert_leaf_lazy(commitment(i)).unwrap();
+        }
+        partial.build_tree();
+        println!("PARTIAL3_ROOT = {:?}", partial.root());
+
+        let mut full = OffChainImtBuilder::new(3);
+        for i in 1..=8 {
+            full.insert_leaf_lazy(commitment(i)).unwrap();
+        }
+        full.build_tree();
+        for (i, n) in full.nodes.iter().enumerate() {
+            println!("FULL_NODE[{}] = {:?}", i, n);
+        }
+    }
+}
