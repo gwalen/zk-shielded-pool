@@ -3,7 +3,7 @@ use halo2_base::poseidon::hasher::PoseidonSponge;
 use halo2_base::{
     AssignedValue, Context,
     gates::{GateChip, GateInstructions, circuit::builder::BaseCircuitBuilder},
-    halo2_proofs::{arithmetic::Field, dev::MockProver, halo2curves::bn256::Fr},
+    halo2_proofs::{dev::MockProver, halo2curves::bn256::Fr},
 };
 use hex_literal::hex;
 use pse_poseidon::Poseidon;

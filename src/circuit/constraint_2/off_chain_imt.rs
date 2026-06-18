@@ -11,6 +11,7 @@ use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
 // It stores hash, Fr::zero and Fr::one are not possible values
 // ********************
 
+// Note that we start node indexing from 1 (nodes[0] is unused)
 pub struct OffChainImtBuilder {
     pub nodes: Vec<Fr>,
     pub zero_values: Vec<Fr>,
@@ -19,18 +20,25 @@ pub struct OffChainImtBuilder {
     pub tree_depth: u32,
 }
 
+pub struct MerkleProof {
+    pub leaf: Fr, // we prove that this leaf node is part of the tree
+    pub siblings_path: Vec<Fr>,
+    pub siblings_side: Vec<u8>, // side on which node on the path is (0 for left, 1 for right)
+}
+
 impl OffChainImtBuilder {
     pub fn new(tree_depth: u32) -> Self {
         assert!(tree_depth > 0, "Tree depth must be greater than 0");
         assert!(tree_depth <= TREE_DEPTH_MAX as u32, "Tree depth is too large");
 
         // For tree_depth = 20 node_code ~= 2M
-        let node_count = 2usize.pow(tree_depth + 1) - 1;
+        let node_count = 2usize.pow(tree_depth + 1);
         let nodes = vec![EMPTY_VALUE; node_count];
 
         let zero_values = generate_zero_values_for_levels(tree_depth as usize);
-        // We need to skip all the nodes on levels above the zero level where leaves are stored
-        let first_leaf_idx = 2usize.pow(tree_depth as u32) - 1;
+        // We need to skip all the nodes on levels above the zero level where leafs are stored
+        // Note: We start node indexing from 1 this makes the math cleaner
+        let first_leaf_idx = 2usize.pow(tree_depth as u32);
 
         let mut builder = Self {
             nodes,
@@ -45,7 +53,7 @@ impl OffChainImtBuilder {
     }
 
     pub fn root(&self) -> Fr {
-        self.nodes[0]
+        self.nodes[1]
     }
 
     // Insert leaf on next unused leaf position, do not recalculate the full tree
@@ -70,13 +78,39 @@ impl OffChainImtBuilder {
         let mut last_level_start_idx = self.first_leaf_idx;
         // fill other levels
         for level in 1..=self.tree_depth {
-            let level_start_idx = 2usize.pow(self.tree_depth - level) - 1;
+            let level_start_idx = 2usize.pow(self.tree_depth - level);
             for i in level_start_idx..last_level_start_idx {
-                let left_child = self.node(i * 2 + 1);
-                let right_child = self.node(i * 2 + 2);
+                let left_child = self.node(i * 2);
+                let right_child = self.node(i * 2 + 1);
                 self.nodes[i] = poseidon_hash(left_child, right_child)
             }
             last_level_start_idx = level_start_idx;
+        }
+    }
+
+    pub fn merkle_proof(&self, leaf: Fr) -> Result<MerkleProof> {
+        let mut proof = MerkleProof { leaf, siblings_path: Vec::new(), siblings_side: Vec::new() };
+        let leaf_idx = self.find_leaf_index(leaf);
+
+        // TODO: fail fast if leaf does not exist ?
+        // TODO: write it in better style ?
+        if let Some(idx) = leaf_idx {
+            let mut current_idx = idx;
+            while current_idx > 1 {
+                let is_left_leaf = current_idx % 2 == 0;
+                let sibling = if is_left_leaf {
+                    self.nodes[current_idx + 1]
+                } else {
+                    self.nodes[current_idx - 1]
+                };
+                proof.siblings_path.push(sibling);
+                // side of the sibling (opposite to current node), 0 - left, 1 - right
+                proof.siblings_side.push(if is_left_leaf { 1 } else { 0 });
+                current_idx /= 2; // go level up to parent idx
+            }
+            Ok(proof)
+        } else {
+            Err(Error::msg("Leaf is not in the tree"))
         }
     }
 
@@ -90,16 +124,26 @@ impl OffChainImtBuilder {
         }
     }
 
+    fn find_leaf_index(&self, leaf: Fr) -> Option<usize> {
+        for i in self.first_leaf_idx..self.nodes.len() {
+            if self.nodes[i] == leaf {
+                return Some(i);
+            }
+        }
+        None
+    }
+
     /**
+     * Note: We are starting at index 1 (leaving index 0 unused makes the math clean):
      * Example tree indexes for depth = 3 :
-     *            0               - level 3 (root)
-     *      1            2        - level 2
-     *   3    4      5      6     - level 1
-     *  7 8  9 10  11 12  13 14   - level 0 (leafs)
+     *            1                - level 3 (root)
+     *      2             3        - level 2
+     *   4     5      6      7     - level 1
+     *  8 9  10 11  12 13  14 15   - level 0 (leafs)
      */
     fn calculate_level(&self, node_idx: usize) -> usize {
         // ilog2 - does integer bit logic, not floating-point logarithms. It asks: “what is the position of the highest set bit?”
-        let depth_from_root = (node_idx + 1).ilog2();
+        let depth_from_root = node_idx.ilog2();
         (self.tree_depth - depth_from_root) as usize
     }
 }
@@ -112,7 +156,7 @@ pub mod tests {
     use solana_poseidon::{Endianness, Parameters};
 
     // ---------------------------------------------------------------------
-    // Snapshot of the depth-3 reference tree (leaves = commitment(1..=8)).
+    // Snapshot of the depth-3 reference tree (leafs = commitment(1..=8)).
     // These are the single source of truth for IMT expected values: the
     // on-chain tests cross-check against this builder at runtime instead of
     // duplicating constants. Regenerate only if the hash impl legitimately
@@ -130,8 +174,11 @@ pub mod tests {
         "0x07eac97f63c362dc3151636e70236b1528a2b9ed70314ccab77a590cd7da7463";
     pub(crate) const PARTIAL3_ROOT_HEX: &str =
         "0x102120bf2b43d7898df1064785e27a9a6f871039b371cf7be59588de6ddb8c52";
-    // Full depth-3 tree, all 15 nodes in array order (index 0 == root).
-    pub(crate) const FULL_NODES: [&str; 15] = [
+    // Full depth-3 tree, all 15 used nodes in array order
+    // Includes root, internal nodes, and leaves.
+    // Note: 
+    // It has length 15 because it stores only the used tree nodes, without unused nodes[0], so FULL_DEPTH3_TREE_NODES[0] -> builder.nodes[1]
+    pub(crate) const FULL_DEPTH3_TREE_NODES: [&str; 15] = [
         "0x1c941927a5dfda40573b22729c1c627c0ae71b7e68dd1bd873d533076e009829",
         "0x0ae35a1d69b5edf22c9c8f3c516e71844d314d2783e6be55ecbb4041dd0f4da8",
         "0x2e2649c7b46d9873f008c516182b540108b41ccf412019564403fa3d9ae3c112",
@@ -167,27 +214,27 @@ pub mod tests {
         format!("{:?}", f)
     }
 
-    // test_layout_depth3 — first_leaf_idx==7, nodes.len()==15, next_free_leaf_idx==7 after new(3) | structural
+    // test_layout_depth3 — first_leaf_idx==8, nodes.len()==16, next_free_leaf_idx==8 after new(3) | structural
     #[test]
     fn test_layout_depth3() {
         let builder = OffChainImtBuilder::new(3);
-        assert_eq!(builder.first_leaf_idx, 7);
-        assert_eq!(builder.nodes.len(), 15);
-        assert_eq!(builder.next_free_leaf_idx, 7);
+        assert_eq!(builder.first_leaf_idx, 8);
+        assert_eq!(builder.nodes.len(), 16);
+        assert_eq!(builder.next_free_leaf_idx, 8);
     }
 
-    // test_calculate_level — idx 0→3, 1–2→2, 3–6→1, 7–14→0 (pins the ilog2 math) | structural
+    // test_calculate_level — idx 1→3, 2–3→2, 4–7→1, 8–15→0 (pins the ilog2 math) | structural
     #[test]
     fn test_calculate_level() {
         let builder = OffChainImtBuilder::new(3);
-        assert_eq!(builder.calculate_level(0), 3);
-        for i in 1..=2 {
+        assert_eq!(builder.calculate_level(1), 3);
+        for i in 2..=3 {
             assert_eq!(builder.calculate_level(i), 2);
         }
-        for i in 3..=6 {
+        for i in 4..=7 {
             assert_eq!(builder.calculate_level(i), 1);
         }
-        for i in 7..=14 {
+        for i in 8..=15 {
             assert_eq!(builder.calculate_level(i), 0);
         }
     }
@@ -218,14 +265,14 @@ pub mod tests {
         builder.insert_leaf_lazy(commitment(1)).unwrap();
         builder.build_tree();
         assert_eq!(hex(builder.root()), SINGLE_ROOT_HEX);
-        // only leaf 0 (node 7) is set; the rest resolve to the leaf-level zero value Z_0
-        assert_eq!(builder.nodes[7], commitment(1));
-        for i in 8..=14 {
+        // only leaf 0 (node 8) is set; the rest resolve to the leaf-level zero value Z_0
+        assert_eq!(builder.nodes[8], commitment(1));
+        for i in 9..=15 {
             assert_eq!(builder.nodes[i], zv[0]);
         }
     }
 
-    // test_full_tree_snapshot — insert 8 commitment leaves, build_tree, assert entire 15-node nodes vector matches snapshot array | snapshot (strong)
+    // test_full_tree_snapshot — insert 8 commitment leafs, build_tree, assert entire 15-node nodes vector matches snapshot array | snapshot (strong)
     #[test]
     fn test_full_tree_snapshot() {
         let mut builder = OffChainImtBuilder::new(3);
@@ -233,12 +280,13 @@ pub mod tests {
             builder.insert_leaf_lazy(commitment(i)).unwrap();
         }
         builder.build_tree();
-        for (i, expected) in FULL_NODES.iter().enumerate() {
-            assert_eq!(hex(builder.nodes[i]), *expected, "node {}", i);
+        for (i, expected) in FULL_DEPTH3_TREE_NODES.iter().enumerate() {
+            let node_idx = i + 1;
+            assert_eq!(hex(builder.nodes[node_idx]), *expected, "node {}", node_idx);
         }
     }
 
-    // test_partial_tree_zero_substitution — insert 3 leaves, build, root matches snapshot (exercises node() zero-fill) | snapshot
+    // test_partial_tree_zero_substitution — insert 3 leafs, build, root matches snapshot (exercises node() zero-fill) | snapshot
     #[test]
     fn test_partial_tree_zero_substitution() {
         let zv = generate_zero_values_for_levels(3);
@@ -248,8 +296,8 @@ pub mod tests {
         }
         builder.build_tree();
         assert_eq!(hex(builder.root()), PARTIAL3_ROOT_HEX);
-        // leaves 3..7 (nodes 10..14) were never inserted -> zero-filled with Z_0
-        for i in 10..=14 {
+        // leafs 3..7 (nodes 11..15) were never inserted -> zero-filled with Z_0
+        for i in 11..=15 {
             assert_eq!(builder.nodes[i], zv[0]);
         }
     }
@@ -284,6 +332,32 @@ pub mod tests {
         builder.build_tree();
         assert_eq!(builder.root(), r1);
     }
+
+    // #[test]
+    // fn test_merkle_proof_reconstructs_root() {
+    //     let mut builder = OffChainImtBuilder::new(3);
+    //     for i in 1..=8 {
+    //         builder.insert_leaf_lazy(commitment(i)).unwrap();
+    //     }
+    //     builder.build_tree();
+
+    //     for i in 1..=8 {
+    //         let proof = builder.merkle_proof(commitment(i)).unwrap();
+    //         assert_eq!(proof.siblings_path.len(), 3);
+    //         assert_eq!(proof.siblings_side.len(), 3);
+
+    //         let mut current = proof.leaf;
+    //         for (sibling, side) in proof.siblings_path.iter().zip(proof.siblings_side.iter()) {
+    //             current = if *side == 0 {
+    //                 poseidon_hash(*sibling, current)
+    //             } else {
+    //                 poseidon_hash(current, *sibling)
+    //             };
+    //         }
+
+    //         assert_eq!(current, builder.root(), "proof mismatch for leaf {}", i);
+    //     }
+    // }
 }
 
 // Throwaway helper to (re)generate the depth-3 snapshot constants used in the
