@@ -90,28 +90,42 @@ impl OffChainImtBuilder {
 
     pub fn merkle_proof(&self, leaf: Fr) -> Result<MerkleProof> {
         let mut proof = MerkleProof { leaf, siblings_path: Vec::new(), siblings_side: Vec::new() };
-        let leaf_idx = self.find_leaf_index(leaf);
+        let leaf_idx =
+            self.find_leaf_index(leaf).ok_or_else(|| Error::msg("Leaf is not in the tree"))?;
 
-        // TODO: fail fast if leaf does not exist ?
-        // TODO: write it in better style ?
-        if let Some(idx) = leaf_idx {
-            let mut current_idx = idx;
-            while current_idx > 1 {
-                let is_left_leaf = current_idx % 2 == 0;
-                let sibling = if is_left_leaf {
-                    self.nodes[current_idx + 1]
-                } else {
-                    self.nodes[current_idx - 1]
-                };
-                proof.siblings_path.push(sibling);
-                // side of the sibling (opposite to current node), 0 - left, 1 - right
-                proof.siblings_side.push(if is_left_leaf { 1 } else { 0 });
-                current_idx /= 2; // go level up to parent idx
-            }
-            Ok(proof)
-        } else {
-            Err(Error::msg("Leaf is not in the tree"))
+        let mut current_idx = leaf_idx;
+        while current_idx > 1 {
+            let is_left_leaf = current_idx % 2 == 0;
+            let sibling = if is_left_leaf {
+                self.nodes[current_idx + 1]
+            } else {
+                self.nodes[current_idx - 1]
+            };
+            proof.siblings_path.push(sibling);
+            // side of the sibling (opposite to current node), 0 - left, 1 - right
+            proof.siblings_side.push(if is_left_leaf { 1 } else { 0 });
+            current_idx /= 2; // go level up to parent idx
         }
+        Ok(proof)
+    }
+
+    pub fn verify_merkle_proof(&self, proof: &MerkleProof) -> bool {
+        let mut parent = EMPTY_VALUE;
+        let mut other_sibling = proof.leaf;
+        for i in 0..proof.siblings_path.len() {
+            let sibling = proof.siblings_path[i];
+            let is_left = proof.siblings_side[i] == 0; // 0 - left, 1 - right
+            if is_left {
+                parent = poseidon_hash(sibling, other_sibling);
+            } else {
+                parent = poseidon_hash(other_sibling, sibling);
+            }
+            // level up
+            other_sibling = parent;
+        }
+
+        // check if calculated hash equals root
+        self.root() == parent
     }
 
     fn node(&self, idx: usize) -> Fr {
@@ -176,7 +190,7 @@ pub mod tests {
         "0x102120bf2b43d7898df1064785e27a9a6f871039b371cf7be59588de6ddb8c52";
     // Full depth-3 tree, all 15 used nodes in array order
     // Includes root, internal nodes, and leaves.
-    // Note: 
+    // Note:
     // It has length 15 because it stores only the used tree nodes, without unused nodes[0], so FULL_DEPTH3_TREE_NODES[0] -> builder.nodes[1]
     pub(crate) const FULL_DEPTH3_TREE_NODES: [&str; 15] = [
         "0x1c941927a5dfda40573b22729c1c627c0ae71b7e68dd1bd873d533076e009829",
@@ -333,31 +347,23 @@ pub mod tests {
         assert_eq!(builder.root(), r1);
     }
 
-    // #[test]
-    // fn test_merkle_proof_reconstructs_root() {
-    //     let mut builder = OffChainImtBuilder::new(3);
-    //     for i in 1..=8 {
-    //         builder.insert_leaf_lazy(commitment(i)).unwrap();
-    //     }
-    //     builder.build_tree();
+    #[test]
+    fn test_merkle_proof_check() {
+        let mut builder = OffChainImtBuilder::new(3);
+        for i in 1..=8 {
+            builder.insert_leaf_lazy(commitment(i)).unwrap();
+        }
+        builder.build_tree();
 
-    //     for i in 1..=8 {
-    //         let proof = builder.merkle_proof(commitment(i)).unwrap();
-    //         assert_eq!(proof.siblings_path.len(), 3);
-    //         assert_eq!(proof.siblings_side.len(), 3);
+        // build and check proof for each leaf
+        for i in 1..=8 {
+            let proof = builder.merkle_proof(commitment(i)).unwrap();
+            assert_eq!(proof.siblings_path.len(), 3);
+            assert_eq!(proof.siblings_side.len(), 3);
 
-    //         let mut current = proof.leaf;
-    //         for (sibling, side) in proof.siblings_path.iter().zip(proof.siblings_side.iter()) {
-    //             current = if *side == 0 {
-    //                 poseidon_hash(*sibling, current)
-    //             } else {
-    //                 poseidon_hash(current, *sibling)
-    //             };
-    //         }
-
-    //         assert_eq!(current, builder.root(), "proof mismatch for leaf {}", i);
-    //     }
-    // }
+            assert!(builder.verify_merkle_proof(&proof), "proof mismatch for leaf {}", i);
+        }
+    }
 }
 
 // Throwaway helper to (re)generate the depth-3 snapshot constants used in the
