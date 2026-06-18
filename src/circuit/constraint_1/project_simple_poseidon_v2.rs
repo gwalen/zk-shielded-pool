@@ -1,4 +1,4 @@
-use crate::circuit::solana_poseidon_gadget::{
+use crate::circuit::solana_poseidon_chip::{
     SolanaPoseidonChip, solana_poseidon_hash_native_rust_9,
 };
 use crate::circuit::utils::convert_pubkey_32bytes_to_fr;
