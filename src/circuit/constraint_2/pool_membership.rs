@@ -103,42 +103,106 @@ pub fn build_pool_membership_circuit(
 mod test {
     use super::*;
     use crate::circuit::{constraint_2::off_chain_imt::OffChainImt, solana_poseidon_native};
-    use halo2_base::halo2_proofs::dev::MockProver;
+    use halo2_base::halo2_proofs::dev::{MockProver, VerifyFailure};
 
-    #[test]
-    fn test_pool_membership_ok() {
+    // Build the membership circuit for a given proof + expected root and run the MockProver.
+    fn run_circuit(merkle_proof: MerkleProof, expected_root: Fr) -> Result<(), Vec<VerifyFailure>> {
         let k: usize = 16;
-
-        // Build IMT for testing
-        let imt_tree = create_test_imt_tree();
-
-        // --- private proof values
-        let merkle_proof = imt_tree.merkle_proof(solana_poseidon_native::hash1(5)).unwrap();
-        // ---
-
-        let expected_root = imt_tree.root();
-
         let mut builder = BaseCircuitBuilder::<Fr>::new(false).use_k(k).use_instance_columns(1);
-
         build_pool_membership_circuit(&mut builder, merkle_proof);
         builder.calculate_params(Some(9));
-
-        let public_instances = vec![vec![expected_root]];
-        let verification_result =
-            MockProver::run(k as u32, &builder, public_instances).unwrap().verify();
-
-        match &verification_result {
-            Ok(()) => println!("Merkle inclusion proof verification successful"),
-            Err(e) => println!("Merkle inclusion proof verification failed: {e:?}"),
-        }
+        MockProver::run(k as u32, &builder, vec![vec![expected_root]]).unwrap().verify()
     }
 
-    pub fn create_test_imt_tree() -> OffChainImt {
+    // Full depth-3 tree with commitment leafs hash1(1..=8).
+    fn create_test_imt_tree() -> OffChainImt {
         let mut off_chain_imt = OffChainImt::new(3);
         for i in 1..=8 {
             off_chain_imt.insert_leaf_lazy(solana_poseidon_native::hash1(i)).unwrap();
         }
         off_chain_imt.build_tree();
         off_chain_imt
+    }
+
+    // Simple test, prove leaf hash1(5) is in the full tree, assert ok
+    #[test]
+    fn test_pool_membership_ok() {
+        let imt_tree = create_test_imt_tree();
+        let merkle_proof = imt_tree.merkle_proof(solana_poseidon_native::hash1(5)).unwrap();
+        assert!(run_circuit(merkle_proof, imt_tree.root()).is_ok());
+    }
+
+    // Loop 1..=8, build proof for each leaf, assert ok
+    #[test]
+    fn test_pool_membership_all_leaves_ok() {
+        let imt_tree = create_test_imt_tree();
+        for i in 1..=8 {
+            let merkle_proof = imt_tree.merkle_proof(solana_poseidon_native::hash1(i)).unwrap();
+            assert!(run_circuit(merkle_proof, imt_tree.root()).is_ok(), "leaf {i} failed");
+        }
+    }
+
+    // Insert 3 leaves into a depth-3 tree, prove one of them (siblings are zero-values), assert ok
+    #[test]
+    fn test_pool_membership_partial_tree_ok() {
+        let mut imt_tree = OffChainImt::new(3);
+        for i in 1..=3 {
+            imt_tree.insert_leaf_lazy(solana_poseidon_native::hash1(i)).unwrap();
+        }
+        imt_tree.build_tree();
+        let merkle_proof = imt_tree.merkle_proof(solana_poseidon_native::hash1(2)).unwrap();
+        assert!(run_circuit(merkle_proof, imt_tree.root()).is_ok());
+    }
+
+    // Real proof, pass tampered expected_root (root + 1), assert err
+    #[test]
+    fn test_pool_membership_wrong_root_fails() {
+        let imt_tree = create_test_imt_tree();
+        let merkle_proof = imt_tree.merkle_proof(solana_poseidon_native::hash1(5)).unwrap();
+        let wrong_root = imt_tree.root() + Fr::one();
+        assert!(run_circuit(merkle_proof, wrong_root).is_err());
+    }
+
+    // Valid proof, swap proof.leaf to a different value, assert err
+    #[test]
+    fn test_pool_membership_wrong_leaf_fails() {
+        let imt_tree = create_test_imt_tree();
+        let mut merkle_proof = imt_tree.merkle_proof(solana_poseidon_native::hash1(5)).unwrap();
+        merkle_proof.leaf = solana_poseidon_native::hash1(99); // not the proven leaf
+        assert!(run_circuit(merkle_proof, imt_tree.root()).is_err());
+    }
+
+    // Corrupt siblings_path[k], loop k over every position, assert err for each
+    #[test]
+    fn test_pool_membership_tampered_sibling_fails() {
+        let imt_tree = create_test_imt_tree();
+        for k in 0..imt_tree.tree_depth as usize {
+            let mut merkle_proof =
+                imt_tree.merkle_proof(solana_poseidon_native::hash1(5)).unwrap();
+            merkle_proof.siblings_path[k] += Fr::one(); // tamper one sibling on the path
+            assert!(
+                run_circuit(merkle_proof, imt_tree.root()).is_err(),
+                "sibling at position {k} is not constrained into the root"
+            );
+        }
+    }
+
+    // Flip siblings_side[k] (0↔1) at a level with distinct siblings (full tree), assert err
+    #[test]
+    fn test_pool_membership_flipped_side_fails() {
+        let imt_tree = create_test_imt_tree();
+        let mut merkle_proof = imt_tree.merkle_proof(solana_poseidon_native::hash1(5)).unwrap();
+        // leaf-level siblings are distinct in a full tree, so swapping order changes the hash
+        merkle_proof.siblings_side[0] ^= 1;
+        assert!(run_circuit(merkle_proof, imt_tree.root()).is_err());
+    }
+
+    // Set siblings_side[k] = 2, assert err (triggers assert_bit violation)
+    #[test]
+    fn test_pool_membership_non_bit_side_fails() {
+        let imt_tree = create_test_imt_tree();
+        let mut merkle_proof = imt_tree.merkle_proof(solana_poseidon_native::hash1(5)).unwrap();
+        merkle_proof.siblings_side[0] = 2; // not a bit (0/1) -> assert_bit fails
+        assert!(run_circuit(merkle_proof, imt_tree.root()).is_err());
     }
 }
