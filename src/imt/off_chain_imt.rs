@@ -1,4 +1,4 @@
-use crate::circuit::constraint_2::imt_utils::{
+use crate::imt::imt_utils::{
     EMPTY_VALUE, TREE_DEPTH_MAX, Z_0, generate_zero_values_for_levels, poseidon_hash,
 };
 use anyhow::{Error, Result};
@@ -165,8 +165,8 @@ impl OffChainImt {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::circuit::constraint_2::imt_utils::poseidon_hash;
-    use crate::circuit::solana_poseidon_native::hash1;
+    use crate::circuit::poseidon::solana_poseidon_native::hash1;
+    use crate::imt::imt_utils::poseidon_hash;
 
     // ---------------------------------------------------------------------
     // Snapshot of the depth-3 reference tree (leafs = commitment(1..=8)).
@@ -356,8 +356,8 @@ pub mod tests {
 // the printed values into the snapshot consts. Not an assertion test.
 #[cfg(test)]
 mod capture {
-    use crate::circuit::solana_poseidon_native::hash1;
     use super::*;
+    use crate::circuit::poseidon::solana_poseidon_native::hash1;
 
     #[test]
     fn print_snapshots() {

@@ -1,5 +1,5 @@
-use crate::circuit::solana_poseidon_chip::{SolanaPoseidonChip, commitment_9_inputs};
-use crate::circuit::solana_poseidon_native;
+use crate::circuit::poseidon::solana_poseidon_chip::{SolanaPoseidonChip, commitment_9_inputs};
+use crate::circuit::poseidon::solana_poseidon_native;
 use crate::circuit::utils::convert_pubkey_32bytes_to_fr;
 use halo2_base::{
     AssignedValue,

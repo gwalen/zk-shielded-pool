@@ -1,6 +1,8 @@
 use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
 use solana_poseidon::{Endianness, Parameters, hashv};
-use crate::circuit::solana_poseidon_chip::{SOLANA_POSEIDON_INPUTS_2, SOLANA_POSEIDON_INPUTS_9};
+use crate::circuit::poseidon::solana_poseidon_chip::{
+    SOLANA_POSEIDON_INPUTS_2, SOLANA_POSEIDON_INPUTS_9,
+};
 use crate::circuit::utils::{fr_from_le_bytes, fr_to_le_bytes};
 
 pub fn hash9(inputs: &[Fr; SOLANA_POSEIDON_INPUTS_9]) -> Fr {

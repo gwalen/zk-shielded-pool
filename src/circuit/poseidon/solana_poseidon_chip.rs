@@ -225,7 +225,10 @@ fn apply_mds<const WIDTH: usize>(
 
 #[cfg(test)]
 mod tests {
-    use crate::circuit::{constraint_1::project_simple_poseidon_v2::MAX_CHUNKS, solana_poseidon_native};
+    use crate::circuit::{
+        constraint_1::project_simple_poseidon_v2::MAX_CHUNKS,
+        poseidon::solana_poseidon_native,
+    };
     use crate::circuit::utils::convert_pubkey_32bytes_to_fr;
 
     use super::*;

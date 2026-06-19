@@ -1,5 +1,5 @@
-use crate::circuit::constraint_2::off_chain_imt::MerkleProof;
-use crate::circuit::solana_poseidon_chip::SolanaPoseidonChip;
+use crate::circuit::poseidon::solana_poseidon_chip::SolanaPoseidonChip;
+use crate::imt::off_chain_imt::MerkleProof;
 use halo2_base::{
     AssignedValue, Context,
     gates::{GateChip, GateInstructions, circuit::builder::BaseCircuitBuilder},
@@ -102,7 +102,8 @@ pub fn build_pool_membership_circuit(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::circuit::{constraint_2::off_chain_imt::OffChainImt, solana_poseidon_native};
+    use crate::circuit::poseidon::solana_poseidon_native;
+    use crate::imt::off_chain_imt::OffChainImt;
     use halo2_base::halo2_proofs::dev::{MockProver, VerifyFailure};
 
     // Build the membership circuit for a given proof + expected root and run the MockProver.

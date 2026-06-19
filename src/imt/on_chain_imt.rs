@@ -1,4 +1,4 @@
-use crate::circuit::constraint_2::imt_utils::{
+use crate::imt::imt_utils::{
     EMPTY_VALUE, TREE_DEPTH_MAX, generate_zero_values_for_levels, poseidon_hash,
 };
 use anyhow::{Error, Result};
@@ -112,10 +112,10 @@ impl<const TREE_DEPTH: usize> OnChainImt<TREE_DEPTH> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::circuit::constraint_2::off_chain_imt::OffChainImt;
+    use crate::circuit::poseidon::solana_poseidon_native::hash1;
     // Leaf generator + snapshots are owned by the builder tests; we cross-check
     // against the builder at runtime instead of duplicating constants.
-    use crate::circuit::solana_poseidon_native::hash1;
+    use crate::imt::off_chain_imt::OffChainImt;
 
     // test_empty_root_matches_builder — OnChainImt::<3>::new().root == OffChainImtBuilder::new(3).root() | differential
     #[test]
