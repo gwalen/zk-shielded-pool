@@ -12,7 +12,7 @@ use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
 // ********************
 
 // Note that we start node indexing from 1 (nodes[0] is unused)
-pub struct OffChainImtBuilder {
+pub struct OffChainImtBuilder { // TODO: rename to OffChainImt
     pub nodes: Vec<Fr>,
     pub zero_values: Vec<Fr>,
     pub first_leaf_idx: usize,
@@ -166,8 +166,7 @@ impl OffChainImtBuilder {
 pub mod tests {
     use super::*;
     use crate::circuit::constraint_2::imt_utils::poseidon_hash;
-    use crate::circuit::utils::{fr_from_le_bytes, fr_to_le_bytes};
-    use solana_poseidon::{Endianness, Parameters};
+    use crate::circuit::solana_poseidon_native::hash1;
 
     // ---------------------------------------------------------------------
     // Snapshot of the depth-3 reference tree (leafs = commitment(1..=8)).
@@ -209,20 +208,6 @@ pub mod tests {
         "0x0f9cebf54307bbb3646866aa15d2cd6e961caea77048b87f4261b7636240254e",
         "0x135ec460f4a519cb3a7eb19a4e3486c6d25bad46c5b7af029af91009534c3be4",
     ];
-
-    /// Realistic leaf value: in practice every leaf is a Poseidon commitment
-    /// hash, so we hash a single `Fr` seed. The result is a 32-byte field
-    /// element, so it is never `Z_0`/`EMPTY_VALUE` (0/1) and passes the
-    /// builder's leaf-validity check. Shared with the on-chain tests.
-    pub(crate) fn commitment(seed: u64) -> Fr {
-        let h = solana_poseidon::hash(
-            Parameters::Bn254X5,
-            Endianness::LittleEndian,
-            &fr_to_le_bytes(Fr::from(seed)),
-        )
-        .unwrap();
-        fr_from_le_bytes(h.to_bytes())
-    }
 
     fn hex(f: Fr) -> String {
         format!("{:?}", f)
@@ -276,11 +261,11 @@ pub mod tests {
     fn test_single_leaf_snapshot() {
         let zv = generate_zero_values_for_levels(3);
         let mut builder = OffChainImtBuilder::new(3);
-        builder.insert_leaf_lazy(commitment(1)).unwrap();
+        builder.insert_leaf_lazy(hash1(1)).unwrap();
         builder.build_tree();
         assert_eq!(hex(builder.root()), SINGLE_ROOT_HEX);
         // only leaf 0 (node 8) is set; the rest resolve to the leaf-level zero value Z_0
-        assert_eq!(builder.nodes[8], commitment(1));
+        assert_eq!(builder.nodes[8], hash1(1));
         for i in 9..=15 {
             assert_eq!(builder.nodes[i], zv[0]);
         }
@@ -291,7 +276,7 @@ pub mod tests {
     fn test_full_tree_snapshot() {
         let mut builder = OffChainImtBuilder::new(3);
         for i in 1..=8 {
-            builder.insert_leaf_lazy(commitment(i)).unwrap();
+            builder.insert_leaf_lazy(hash1(i)).unwrap();
         }
         builder.build_tree();
         for (i, expected) in FULL_DEPTH3_TREE_NODES.iter().enumerate() {
@@ -306,7 +291,7 @@ pub mod tests {
         let zv = generate_zero_values_for_levels(3);
         let mut builder = OffChainImtBuilder::new(3);
         for i in 1..=3 {
-            builder.insert_leaf_lazy(commitment(i)).unwrap();
+            builder.insert_leaf_lazy(hash1(i)).unwrap();
         }
         builder.build_tree();
         assert_eq!(hex(builder.root()), PARTIAL3_ROOT_HEX);
@@ -329,9 +314,9 @@ pub mod tests {
     fn test_tree_full() {
         let mut builder = OffChainImtBuilder::new(3);
         for i in 1..=8 {
-            builder.insert_leaf_lazy(commitment(i)).unwrap();
+            builder.insert_leaf_lazy(hash1(i)).unwrap();
         }
-        assert!(builder.insert_leaf_lazy(commitment(9)).is_err());
+        assert!(builder.insert_leaf_lazy(hash1(9)).is_err());
     }
 
     // test_build_tree_idempotent — build_tree() twice → same root | invariant
@@ -339,7 +324,7 @@ pub mod tests {
     fn test_build_tree_idempotent() {
         let mut builder = OffChainImtBuilder::new(3);
         for i in 1..=5 {
-            builder.insert_leaf_lazy(commitment(i)).unwrap();
+            builder.insert_leaf_lazy(hash1(i)).unwrap();
         }
         builder.build_tree();
         let r1 = builder.root();
@@ -351,13 +336,13 @@ pub mod tests {
     fn test_merkle_proof_check() {
         let mut builder = OffChainImtBuilder::new(3);
         for i in 1..=8 {
-            builder.insert_leaf_lazy(commitment(i)).unwrap();
+            builder.insert_leaf_lazy(hash1(i)).unwrap();
         }
         builder.build_tree();
 
         // build and check proof for each leaf
         for i in 1..=8 {
-            let proof = builder.merkle_proof(commitment(i)).unwrap();
+            let proof = builder.merkle_proof(hash1(i)).unwrap();
             assert_eq!(proof.siblings_path.len(), 3);
             assert_eq!(proof.siblings_side.len(), 3);
 
@@ -371,7 +356,7 @@ pub mod tests {
 // the printed values into the snapshot consts. Not an assertion test.
 #[cfg(test)]
 mod capture {
-    use super::tests::commitment;
+    use crate::circuit::solana_poseidon_native::hash1;
     use super::*;
 
     #[test]
@@ -385,20 +370,20 @@ mod capture {
         println!("EMPTY_ROOT = {:?}", empty.root());
 
         let mut single = OffChainImtBuilder::new(3);
-        single.insert_leaf_lazy(commitment(1)).unwrap();
+        single.insert_leaf_lazy(hash1(1)).unwrap();
         single.build_tree();
         println!("SINGLE_ROOT = {:?}", single.root());
 
         let mut partial = OffChainImtBuilder::new(3);
         for i in 1..=3 {
-            partial.insert_leaf_lazy(commitment(i)).unwrap();
+            partial.insert_leaf_lazy(hash1(i)).unwrap();
         }
         partial.build_tree();
         println!("PARTIAL3_ROOT = {:?}", partial.root());
 
         let mut full = OffChainImtBuilder::new(3);
         for i in 1..=8 {
-            full.insert_leaf_lazy(commitment(i)).unwrap();
+            full.insert_leaf_lazy(hash1(i)).unwrap();
         }
         full.build_tree();
         for (i, n) in full.nodes.iter().enumerate() {

@@ -115,7 +115,7 @@ mod tests {
     use crate::circuit::constraint_2::off_chain_imt::OffChainImtBuilder;
     // Leaf generator + snapshots are owned by the builder tests; we cross-check
     // against the builder at runtime instead of duplicating constants.
-    use crate::circuit::constraint_2::off_chain_imt::tests::commitment;
+    use crate::circuit::solana_poseidon_native::hash1;
 
     // test_empty_root_matches_builder — OnChainImt::<3>::new().root == OffChainImtBuilder::new(3).root() | differential
     #[test]
@@ -144,7 +144,7 @@ mod tests {
         let mut on_chain_imt = OnChainImt::<3>::new();
         let mut off_chain_imt = OffChainImtBuilder::new(3);
         for i in 1..=8u64 {
-            let leaf = commitment(i);
+            let leaf = hash1(i);
             on_chain_imt.insert(leaf).unwrap();
             off_chain_imt.insert_leaf_lazy(leaf).unwrap();
             off_chain_imt.build_tree();
@@ -162,11 +162,11 @@ mod tests {
     fn test_tree_full() {
         let mut on_chain_imt = OnChainImt::<3>::new();
         for i in 1..=8u64 {
-            on_chain_imt.insert(commitment(i)).unwrap();
+            on_chain_imt.insert(hash1(i)).unwrap();
         }
         let root_before = on_chain_imt.root;
         let idx_before = on_chain_imt.next_leaf_idx;
-        assert!(on_chain_imt.insert(commitment(9)).is_err());
+        assert!(on_chain_imt.insert(hash1(9)).is_err());
         assert_eq!(on_chain_imt.root, root_before);
         assert_eq!(on_chain_imt.next_leaf_idx, idx_before);
     }
@@ -177,7 +177,7 @@ mod tests {
         let mut on_chain_imt = OnChainImt::<3>::new();
         assert_eq!(on_chain_imt.next_leaf_idx, 0);
         for i in 1..=8u64 {
-            on_chain_imt.insert(commitment(i)).unwrap();
+            on_chain_imt.insert(hash1(i)).unwrap();
             assert_eq!(on_chain_imt.next_leaf_idx, i as usize);
         }
     }
@@ -187,7 +187,7 @@ mod tests {
     fn test_roots_history_records_each_root() {
         let mut on_chain_imt = OnChainImt::<3>::new();
         for i in 1..=8u64 {
-            on_chain_imt.insert(commitment(i)).unwrap();
+            on_chain_imt.insert(hash1(i)).unwrap();
             assert_eq!(on_chain_imt.roots_history[on_chain_imt.last_root_idx], on_chain_imt.root);
         }
     }
@@ -198,8 +198,8 @@ mod tests {
         let mut on_chain_imt_a = OnChainImt::<3>::new();
         let mut on_chain_imt_b = OnChainImt::<3>::new();
         for i in 1..=6u64 {
-            on_chain_imt_a.insert(commitment(i)).unwrap();
-            on_chain_imt_b.insert(commitment(i)).unwrap();
+            on_chain_imt_a.insert(hash1(i)).unwrap();
+            on_chain_imt_b.insert(hash1(i)).unwrap();
         }
         assert_eq!(on_chain_imt_a.root, on_chain_imt_b.root);
     }

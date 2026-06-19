@@ -1,17 +1,141 @@
 use halo2_base::halo2_proofs::dev::VerifyFailure;
-use halo2_base::poseidon::hasher::PoseidonSponge;
 use halo2_base::{
     AssignedValue, Context,
     gates::{GateChip, GateInstructions, circuit::builder::BaseCircuitBuilder},
-    halo2_proofs::{arithmetic::Field, dev::MockProver, halo2curves::bn256::Fr},
+    halo2_proofs::{dev::MockProver, halo2curves::bn256::Fr},
 };
 
-// *** Pool membership constraint ***
+use crate::circuit::constraint_2::off_chain_imt::{MerkleProof, OffChainImtBuilder};
+use crate::circuit::solana_poseidon_chip::SolanaPoseidonChip;
+use crate::circuit::solana_poseidon_native;
 
-// TODO:
-// *1. on-chain IMT insert that holds just root and frontier values (as Fr) and precomputed Z_k empty leafs values for each level.
-// *2. off-chain IMT tree builder for whole tree at given time (after all inserts) that will be used to create the Merkle proof of inclusion for given commitment.
-// 3. circuit IMT Merkle proof checker to assert that given commitment is in the tree.
-//
-// - For hashing we use Solana Poseidon.
-// - All elements of IMT are Fr.
+pub struct MerkleProofChip {
+    gate: GateChip<Fr>,
+}
+
+impl MerkleProofChip {
+    pub fn new() -> Self {
+        Self { gate: GateChip::default() }
+    }
+
+    /// leaf - we prove that this leaf node is part of the tree
+    /// siblings_path - merkle proof path
+    /// siblings_side - side on which node on the path is (0 for left, 1 for right)
+    pub fn run_proof(
+        &self,
+        ctx: &mut Context<Fr>,
+        leaf: AssignedValue<Fr>, // in circuit we can only operate on AssignedValues
+        siblings_path: &Vec<AssignedValue<Fr>>,
+        siblings_side: &Vec<AssignedValue<Fr>>,
+        solana_poseidon_chip: &SolanaPoseidonChip<2>,
+    ) -> AssignedValue<Fr> {
+        let siblings_path_len = ctx.load_constant(Fr::from(siblings_path.len() as u64));
+        let siblings_side_len = ctx.load_constant(Fr::from(siblings_side.len() as u64));
+        // check if vectors are equal and have expected size
+        ctx.constrain_equal(&siblings_path_len, &siblings_side_len);
+
+        let mut current_node = leaf;
+        for i in 0..siblings_path.len() {
+            let sibling = siblings_path[i];
+            // make sure side is 0 or 1 so that we can use it as boolean in gate.select
+            self.gate.assert_bit(ctx, siblings_side[i]);
+            // normally we would have:
+            // left = siblings_side[i] == 0 ? sibling : current_node;
+            // but in circuit we can not do simple == 0, and siblings_side[i] will be treated as boolean
+            // where 0 - false and 1 - true
+            // with boolean it would be:
+            // left = !siblings_side[i] ? sibling : current_node;
+            // but to avoid additional negation gate we need to invert it:
+            // left = siblings_side[i] ? current_node : sibling;
+            let left = self.gate.select(ctx, current_node, sibling, siblings_side[i]); // under the hood:  sel * (a - b) + b
+            let right = self.gate.select(ctx, sibling, current_node, siblings_side[i]);
+
+            current_node = solana_poseidon_chip.hash_commitment_2_inputs(ctx, left, right);
+        }
+
+        // last calculated node is root
+        current_node
+    }
+}
+
+/*
+ * Notes:
+ *
+ * Q1: what if just had tree_depth and had to use as ceiling in for loop ?
+ * -> Than you need to convert Fr to usize:
+ * let bytes = fr_to_le_bytes(tree_depth);            // [u8; 32], little-endian
+ * let depth = u64::from_le_bytes(bytes[..8].try_into().unwrap()) as usize
+ * and do:  for i in 0..depth {..}
+ * 
+ * Q2: can I invert the 0/1 value, basically get the result of !sibling_side[i] ?
+ * -> Yes, using not gate:
+ * let is_left = self.gate.not(ctx, siblings_side[i]);  // under the hood it simply returns:  1 - x
+ */
+
+pub fn build_pool_membership_circuit(
+    builder: &mut BaseCircuitBuilder<Fr>,
+    merkle_proof: MerkleProof,
+) {
+    let poseidon_chip = SolanaPoseidonChip::<2>::new();
+    let merkle_proof_chip = MerkleProofChip::new();
+    let ctx = builder.main(0);
+
+    // load witnesses (advice columns)
+    let leaf_witness = ctx.load_witness(merkle_proof.leaf);
+    let siblings_path_witness =
+        merkle_proof.siblings_path.iter().map(|&sib| ctx.load_witness(sib)).collect();
+    let siblings_side_witness = merkle_proof
+        .siblings_side
+        .iter()
+        .map(|&side| ctx.load_witness(Fr::from(side as u64)))
+        .collect();
+
+    let root_from_merkle_proof = merkle_proof_chip.run_proof(
+        ctx,
+        leaf_witness,
+        &siblings_path_witness,
+        &siblings_side_witness,
+        &poseidon_chip,
+    );
+
+    // builder.assign_instances(instance_columns, layouter); // TODO: ask Adam how to use it ? why we use direct array access (seems lower level) ?
+    builder.assigned_instances[0].push(root_from_merkle_proof);
+}
+
+pub fn run_constraint_2_pool_membership_test_ok() -> Result<(), Vec<VerifyFailure>> {
+    let k: usize = 16;
+
+    // Build IMT for testing
+    let imt_tree = create_test_imt_tree();
+
+    // --- private proof values
+    let merkle_proof = imt_tree.merkle_proof(solana_poseidon_native::hash1(5)).unwrap();
+    // ---
+
+    let expected_root = imt_tree.root();
+
+    let mut builder = BaseCircuitBuilder::<Fr>::new(false).use_k(k).use_instance_columns(1);
+
+    build_pool_membership_circuit(&mut builder, merkle_proof);
+    builder.calculate_params(Some(9));
+
+    let public_instances = vec![vec![expected_root]];
+    let verification_result =
+        MockProver::run(k as u32, &builder, public_instances).unwrap().verify();
+
+    match &verification_result {
+        Ok(()) => println!("Merkle inclusion proof verification successful"),
+        Err(e) => println!("Merkle inclusion proof verification failed: {e:?}"),
+    }
+
+    verification_result
+}
+
+pub fn create_test_imt_tree() -> OffChainImtBuilder {
+    let mut builder = OffChainImtBuilder::new(3);
+    for i in 1..=8 {
+        builder.insert_leaf_lazy(solana_poseidon_native::hash1(i)).unwrap();
+    }
+    builder.build_tree();
+    builder
+}

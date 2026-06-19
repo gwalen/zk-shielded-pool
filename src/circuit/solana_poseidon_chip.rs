@@ -6,9 +6,8 @@ use halo2_base::{
     halo2_proofs::arithmetic::Field,
 };
 use pse_poseidon::Spec;
-use solana_poseidon::{Endianness, Parameters, hashv};
 
-use crate::circuit::utils::{fr_from_le_bytes, fr_to_le_bytes};
+use crate::circuit::constraint_1::project_simple_poseidon_v2::MAX_CHUNKS;
 
 // Solana `Parameters::Bn254X5`:
 //   width/state T = inputs + 1
@@ -29,20 +28,23 @@ pub const SOLANA_POSEIDON_INPUTS_2: usize = 2;
 const SOLANA_POSEIDON_WIDTH_2: usize = SOLANA_POSEIDON_INPUTS_2 + 1;
 const SOLANA_POSEIDON_R_P_2: usize = 57;
 
-pub fn solana_poseidon_hash_native_rust_9(inputs: &[Fr; SOLANA_POSEIDON_INPUTS_9]) -> Fr {
-    let input_bytes = inputs.map(fr_to_le_bytes);
-    let input_refs: [&[u8]; SOLANA_POSEIDON_INPUTS_9] =
-        input_bytes.each_ref().map(|bytes| &bytes[..]);
-    let hash = hashv(Parameters::Bn254X5, Endianness::LittleEndian, &input_refs).unwrap();
-    fr_from_le_bytes(hash.to_bytes())
-}
-
-pub fn solana_poseidon_hash_native_rust_2(inputs: &[Fr; SOLANA_POSEIDON_INPUTS_2]) -> Fr {
-    let input_bytes = inputs.map(fr_to_le_bytes);
-    let input_refs: [&[u8]; SOLANA_POSEIDON_INPUTS_2] =
-        input_bytes.each_ref().map(|bytes| &bytes[..]);
-    let hash = hashv(Parameters::Bn254X5, Endianness::LittleEndian, &input_refs).unwrap();
-    fr_from_le_bytes(hash.to_bytes())
+pub fn commitment_9_inputs(
+    s: Fr,
+    total_amount: Fr,
+    chunks: &[Fr; MAX_CHUNKS],
+    addresses: &[Fr; MAX_CHUNKS],
+) -> [Fr; SOLANA_POSEIDON_INPUTS_9] {
+    [
+        s,
+        total_amount,
+        chunks[0],
+        chunks[1],
+        chunks[2],
+        addresses[0],
+        addresses[1],
+        addresses[2],
+        Fr::from(MAX_CHUNKS as u64),
+    ]
 }
 
 pub struct SolanaPoseidonChip<const MAX_CHUNKS: usize> {
@@ -52,25 +54,6 @@ pub struct SolanaPoseidonChip<const MAX_CHUNKS: usize> {
 impl<const MAX_CHUNKS: usize> SolanaPoseidonChip<MAX_CHUNKS> {
     pub fn new() -> Self {
         Self { gate: GateChip::default() }
-    }
-
-    pub fn commitment_9_inputs(
-        s: Fr,
-        total_amount: Fr,
-        chunks: &[Fr; MAX_CHUNKS],
-        addresses: &[Fr; MAX_CHUNKS],
-    ) -> [Fr; SOLANA_POSEIDON_INPUTS_9] {
-        [
-            s,
-            total_amount,
-            chunks[0],
-            chunks[1],
-            chunks[2],
-            addresses[0],
-            addresses[1],
-            addresses[2],
-            Fr::from(MAX_CHUNKS as u64),
-        ]
     }
 
     pub fn hash_commitment_9_inputs(
@@ -242,7 +225,7 @@ fn apply_mds<const WIDTH: usize>(
 
 #[cfg(test)]
 mod tests {
-    use crate::circuit::constraint_1::project_simple_poseidon_v2::MAX_CHUNKS;
+    use crate::circuit::{constraint_1::project_simple_poseidon_v2::MAX_CHUNKS, solana_poseidon_native};
     use crate::circuit::utils::convert_pubkey_32bytes_to_fr;
 
     use super::*;
@@ -273,8 +256,8 @@ mod tests {
 
         for (s, chunks, addresses) in vectors {
             let total_amount = chunks.iter().copied().sum();
-            expected_hashes.push(solana_poseidon_hash_native_rust_9(
-                &SolanaPoseidonChip::commitment_9_inputs(s, total_amount, &chunks, &addresses),
+            expected_hashes.push(solana_poseidon_native::hash9(
+                &commitment_9_inputs(s, total_amount, &chunks, &addresses),
             ));
 
             let ctx = builder.main(0);
@@ -332,7 +315,7 @@ mod tests {
         let mut expected_hashes = Vec::with_capacity(hash_pairs.len());
 
         for (left, right) in hash_pairs {
-            expected_hashes.push(solana_poseidon_hash_native_rust_2(&[left, right]));
+            expected_hashes.push(solana_poseidon_native::hash2(&[left, right]));
 
             let ctx = builder.main(0);
             let left = ctx.load_witness(left);

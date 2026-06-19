@@ -1,6 +1,5 @@
-use crate::circuit::solana_poseidon_chip::{
-    SolanaPoseidonChip, solana_poseidon_hash_native_rust_9,
-};
+use crate::circuit::solana_poseidon_chip::{SolanaPoseidonChip, commitment_9_inputs};
+use crate::circuit::solana_poseidon_native;
 use crate::circuit::utils::convert_pubkey_32bytes_to_fr;
 use halo2_base::{
     AssignedValue,
@@ -40,8 +39,9 @@ pub fn build_solana_poseidon_circuit(
 }
 
 pub fn run_constraint_1_solana_poseidon_test_ok() -> Result<(), Vec<VerifyFailure>> {
-    let k = 16;
+    let k: usize = 16;
 
+    // --- private proof values
     let s = Fr::from(1234567890);
     let total_amount = Fr::from(7);
     let chunks = [Fr::from(2), Fr::from(2), Fr::from(3)];
@@ -52,20 +52,21 @@ pub fn run_constraint_1_solana_poseidon_test_ok() -> Result<(), Vec<VerifyFailur
     let addresses = [addr_hex, addr_hex, addr_hex];
 
     let addresses_fr: [Fr; MAX_CHUNKS] = addresses.map(convert_pubkey_32bytes_to_fr);
+    // ---
 
-    let commitment_inputs =
-        &SolanaPoseidonChip::commitment_9_inputs(s, total_amount, &chunks, &addresses_fr);
-    let poseidon_hash = solana_poseidon_hash_native_rust_9(commitment_inputs);
+    let commitment_inputs = &commitment_9_inputs(s, total_amount, &chunks, &addresses_fr);
+    let poseidon_hash = solana_poseidon_native::hash9(commitment_inputs);
     println!("Solana-compatible Poseidon hash: {:?}", poseidon_hash);
 
     let mut builder =
-        BaseCircuitBuilder::<Fr>::new(false).use_k(k as usize).use_instance_columns(1);
+        BaseCircuitBuilder::<Fr>::new(false).use_k(k).use_instance_columns(1);
 
     build_solana_poseidon_circuit(&mut builder, s, total_amount, &chunks, &addresses_fr);
     builder.calculate_params(Some(9)); // TODO: how to decide that value on prod ? (this is default)
 
-    let instances = vec![vec![poseidon_hash]];
-    let verification_result = MockProver::run(k, &builder, instances).unwrap().verify();
+    let public_instances = vec![vec![poseidon_hash]];
+    let verification_result =
+        MockProver::run(k as u32, &builder, public_instances).unwrap().verify();
     match &verification_result {
         Ok(()) => println!("Solana-compatible Poseidon verification successful"),
         Err(e) => println!("Solana-compatible Poseidon verification failed: {e:?}"),
@@ -87,15 +88,20 @@ mod tests {
     // test rejecting wrong public hash
     #[test]
     fn test_solana_poseidon_rejects_wrong_public_hash() {
+        // --- private proof values
         let k = 16;
         let s = Fr::from(1234567890);
         let total_amount = Fr::from(7);
         let chunks = [Fr::from(2), Fr::from(2), Fr::from(3)];
         let addresses = [Fr::from(1001), Fr::from(1002), Fr::from(1003)];
+        // ---
 
-        let expected_hash = solana_poseidon_hash_native_rust_9(
-            &SolanaPoseidonChip::commitment_9_inputs(s, total_amount, &chunks, &addresses),
-        );
+        let expected_hash = solana_poseidon_native::hash9(&commitment_9_inputs(
+            s,
+            total_amount,
+            &chunks,
+            &addresses,
+        ));
         let wrong_hash = expected_hash + Fr::ONE;
 
         let mut builder = BaseCircuitBuilder::<Fr>::new(false).use_k(k).use_instance_columns(1);
