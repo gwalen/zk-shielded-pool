@@ -112,7 +112,7 @@ impl<const TREE_DEPTH: usize> OnChainImt<TREE_DEPTH> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::circuit::constraint_2::off_chain_imt::OffChainImtBuilder;
+    use crate::circuit::constraint_2::off_chain_imt::OffChainImt;
     // Leaf generator + snapshots are owned by the builder tests; we cross-check
     // against the builder at runtime instead of duplicating constants.
     use crate::circuit::solana_poseidon_native::hash1;
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn test_empty_root_matches_builder() {
         let on_chain_imt = OnChainImt::<3>::new();
-        let off_chain_imt = OffChainImtBuilder::new(3);
+        let off_chain_imt = OffChainImt::new(3);
         assert_eq!(on_chain_imt.root, off_chain_imt.root());
     }
 
@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn test_full_tree_matches_builder_stepwise() {
         let mut on_chain_imt = OnChainImt::<3>::new();
-        let mut off_chain_imt = OffChainImtBuilder::new(3);
+        let mut off_chain_imt = OffChainImt::new(3);
         for i in 1..=8u64 {
             let leaf = hash1(i);
             on_chain_imt.insert(leaf).unwrap();

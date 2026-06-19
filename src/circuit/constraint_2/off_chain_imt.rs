@@ -5,14 +5,14 @@ use anyhow::{Error, Result};
 use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
 
 // ********************
-// This is memory heavy full IMT tree builder that will be used off-chain on the client side
+// This is a memory-heavy full IMT tree implementation used off-chain on the client side
 // to reconstruct the tree and build the Merkle proof of inclusion for give leaf node (commitment hash)
 //
 // It stores hash, Fr::zero and Fr::one are not possible values
 // ********************
 
 // Note that we start node indexing from 1 (nodes[0] is unused)
-pub struct OffChainImtBuilder { // TODO: rename to OffChainImt
+pub struct OffChainImt {
     pub nodes: Vec<Fr>,
     pub zero_values: Vec<Fr>,
     pub first_leaf_idx: usize,
@@ -26,7 +26,7 @@ pub struct MerkleProof {
     pub siblings_side: Vec<u8>, // side on which node on the path is (0 for left, 1 for right)
 }
 
-impl OffChainImtBuilder {
+impl OffChainImt {
     pub fn new(tree_depth: u32) -> Self {
         assert!(tree_depth > 0, "Tree depth must be greater than 0");
         assert!(tree_depth <= TREE_DEPTH_MAX as u32, "Tree depth is too large");
@@ -40,7 +40,7 @@ impl OffChainImtBuilder {
         // Note: We start node indexing from 1 this makes the math cleaner
         let first_leaf_idx = 2usize.pow(tree_depth as u32);
 
-        let mut builder = Self {
+        let mut off_chain_imt = Self {
             nodes,
             zero_values,
             first_leaf_idx,
@@ -48,8 +48,8 @@ impl OffChainImtBuilder {
             tree_depth,
         };
         // build the empty tree with zero values
-        builder.build_tree();
-        builder
+        off_chain_imt.build_tree();
+        off_chain_imt
     }
 
     pub fn root(&self) -> Fr {
@@ -171,7 +171,7 @@ pub mod tests {
     // ---------------------------------------------------------------------
     // Snapshot of the depth-3 reference tree (leafs = commitment(1..=8)).
     // These are the single source of truth for IMT expected values: the
-    // on-chain tests cross-check against this builder at runtime instead of
+    // on-chain tests cross-check against this off-chain IMT at runtime instead of
     // duplicating constants. Regenerate only if the hash impl legitimately
     // changes (a change here that you didn't intend means something broke).
     // ---------------------------------------------------------------------
@@ -190,7 +190,7 @@ pub mod tests {
     // Full depth-3 tree, all 15 used nodes in array order
     // Includes root, internal nodes, and leaves.
     // Note:
-    // It has length 15 because it stores only the used tree nodes, without unused nodes[0], so FULL_DEPTH3_TREE_NODES[0] -> builder.nodes[1]
+    // It has length 15 because it stores only the used tree nodes, without unused nodes[0], so FULL_DEPTH3_TREE_NODES[0] -> off_chain_imt.nodes[1]
     pub(crate) const FULL_DEPTH3_TREE_NODES: [&str; 15] = [
         "0x1c941927a5dfda40573b22729c1c627c0ae71b7e68dd1bd873d533076e009829",
         "0x0ae35a1d69b5edf22c9c8f3c516e71844d314d2783e6be55ecbb4041dd0f4da8",
@@ -216,25 +216,25 @@ pub mod tests {
     // test_layout_depth3 — first_leaf_idx==8, nodes.len()==16, next_free_leaf_idx==8 after new(3) | structural
     #[test]
     fn test_layout_depth3() {
-        let builder = OffChainImtBuilder::new(3);
-        assert_eq!(builder.first_leaf_idx, 8);
-        assert_eq!(builder.nodes.len(), 16);
-        assert_eq!(builder.next_free_leaf_idx, 8);
+        let off_chain_imt = OffChainImt::new(3);
+        assert_eq!(off_chain_imt.first_leaf_idx, 8);
+        assert_eq!(off_chain_imt.nodes.len(), 16);
+        assert_eq!(off_chain_imt.next_free_leaf_idx, 8);
     }
 
     // test_calculate_level — idx 1→3, 2–3→2, 4–7→1, 8–15→0 (pins the ilog2 math) | structural
     #[test]
     fn test_calculate_level() {
-        let builder = OffChainImtBuilder::new(3);
-        assert_eq!(builder.calculate_level(1), 3);
+        let off_chain_imt = OffChainImt::new(3);
+        assert_eq!(off_chain_imt.calculate_level(1), 3);
         for i in 2..=3 {
-            assert_eq!(builder.calculate_level(i), 2);
+            assert_eq!(off_chain_imt.calculate_level(i), 2);
         }
         for i in 4..=7 {
-            assert_eq!(builder.calculate_level(i), 1);
+            assert_eq!(off_chain_imt.calculate_level(i), 1);
         }
         for i in 8..=15 {
-            assert_eq!(builder.calculate_level(i), 0);
+            assert_eq!(off_chain_imt.calculate_level(i), 0);
         }
     }
 
@@ -250,38 +250,38 @@ pub mod tests {
     // test_empty_root_snapshot — empty depth-3 root() matches snapshot, and == poseidon_hash(z2,z2) | snapshot
     #[test]
     fn test_empty_root_snapshot() {
-        let builder = OffChainImtBuilder::new(3);
-        assert_eq!(hex(builder.root()), EMPTY_ROOT_HEX);
+        let off_chain_imt = OffChainImt::new(3);
+        assert_eq!(hex(off_chain_imt.root()), EMPTY_ROOT_HEX);
         let zv = generate_zero_values_for_levels(3);
-        assert_eq!(builder.root(), poseidon_hash(zv[2], zv[2]));
+        assert_eq!(off_chain_imt.root(), poseidon_hash(zv[2], zv[2]));
     }
 
     // test_single_leaf_snapshot — insert one commitment, build_tree, root matches snapshot; path siblings resolve to zero_values | snapshot
     #[test]
     fn test_single_leaf_snapshot() {
         let zv = generate_zero_values_for_levels(3);
-        let mut builder = OffChainImtBuilder::new(3);
-        builder.insert_leaf_lazy(hash1(1)).unwrap();
-        builder.build_tree();
-        assert_eq!(hex(builder.root()), SINGLE_ROOT_HEX);
+        let mut off_chain_imt = OffChainImt::new(3);
+        off_chain_imt.insert_leaf_lazy(hash1(1)).unwrap();
+        off_chain_imt.build_tree();
+        assert_eq!(hex(off_chain_imt.root()), SINGLE_ROOT_HEX);
         // only leaf 0 (node 8) is set; the rest resolve to the leaf-level zero value Z_0
-        assert_eq!(builder.nodes[8], hash1(1));
+        assert_eq!(off_chain_imt.nodes[8], hash1(1));
         for i in 9..=15 {
-            assert_eq!(builder.nodes[i], zv[0]);
+            assert_eq!(off_chain_imt.nodes[i], zv[0]);
         }
     }
 
     // test_full_tree_snapshot — insert 8 commitment leafs, build_tree, assert entire 15-node nodes vector matches snapshot array | snapshot (strong)
     #[test]
     fn test_full_tree_snapshot() {
-        let mut builder = OffChainImtBuilder::new(3);
+        let mut off_chain_imt = OffChainImt::new(3);
         for i in 1..=8 {
-            builder.insert_leaf_lazy(hash1(i)).unwrap();
+            off_chain_imt.insert_leaf_lazy(hash1(i)).unwrap();
         }
-        builder.build_tree();
+        off_chain_imt.build_tree();
         for (i, expected) in FULL_DEPTH3_TREE_NODES.iter().enumerate() {
             let node_idx = i + 1;
-            assert_eq!(hex(builder.nodes[node_idx]), *expected, "node {}", node_idx);
+            assert_eq!(hex(off_chain_imt.nodes[node_idx]), *expected, "node {}", node_idx);
         }
     }
 
@@ -289,64 +289,64 @@ pub mod tests {
     #[test]
     fn test_partial_tree_zero_substitution() {
         let zv = generate_zero_values_for_levels(3);
-        let mut builder = OffChainImtBuilder::new(3);
+        let mut off_chain_imt = OffChainImt::new(3);
         for i in 1..=3 {
-            builder.insert_leaf_lazy(hash1(i)).unwrap();
+            off_chain_imt.insert_leaf_lazy(hash1(i)).unwrap();
         }
-        builder.build_tree();
-        assert_eq!(hex(builder.root()), PARTIAL3_ROOT_HEX);
+        off_chain_imt.build_tree();
+        assert_eq!(hex(off_chain_imt.root()), PARTIAL3_ROOT_HEX);
         // leafs 3..7 (nodes 11..15) were never inserted -> zero-filled with Z_0
         for i in 11..=15 {
-            assert_eq!(builder.nodes[i], zv[0]);
+            assert_eq!(off_chain_imt.nodes[i], zv[0]);
         }
     }
 
     // test_insert_rejects_zero_and_one — insert_leaf_lazy(Z_0) and (EMPTY_VALUE) return Err | error
     #[test]
     fn test_insert_rejects_zero_and_one() {
-        let mut builder = OffChainImtBuilder::new(3);
-        assert!(builder.insert_leaf_lazy(Z_0).is_err());
-        assert!(builder.insert_leaf_lazy(EMPTY_VALUE).is_err());
+        let mut off_chain_imt = OffChainImt::new(3);
+        assert!(off_chain_imt.insert_leaf_lazy(Z_0).is_err());
+        assert!(off_chain_imt.insert_leaf_lazy(EMPTY_VALUE).is_err());
     }
 
     // test_tree_full — 9th insert on depth 3 → Err("Tree is full") | error
     #[test]
     fn test_tree_full() {
-        let mut builder = OffChainImtBuilder::new(3);
+        let mut off_chain_imt = OffChainImt::new(3);
         for i in 1..=8 {
-            builder.insert_leaf_lazy(hash1(i)).unwrap();
+            off_chain_imt.insert_leaf_lazy(hash1(i)).unwrap();
         }
-        assert!(builder.insert_leaf_lazy(hash1(9)).is_err());
+        assert!(off_chain_imt.insert_leaf_lazy(hash1(9)).is_err());
     }
 
     // test_build_tree_idempotent — build_tree() twice → same root | invariant
     #[test]
     fn test_build_tree_idempotent() {
-        let mut builder = OffChainImtBuilder::new(3);
+        let mut off_chain_imt = OffChainImt::new(3);
         for i in 1..=5 {
-            builder.insert_leaf_lazy(hash1(i)).unwrap();
+            off_chain_imt.insert_leaf_lazy(hash1(i)).unwrap();
         }
-        builder.build_tree();
-        let r1 = builder.root();
-        builder.build_tree();
-        assert_eq!(builder.root(), r1);
+        off_chain_imt.build_tree();
+        let r1 = off_chain_imt.root();
+        off_chain_imt.build_tree();
+        assert_eq!(off_chain_imt.root(), r1);
     }
 
     #[test]
     fn test_merkle_proof_check() {
-        let mut builder = OffChainImtBuilder::new(3);
+        let mut off_chain_imt = OffChainImt::new(3);
         for i in 1..=8 {
-            builder.insert_leaf_lazy(hash1(i)).unwrap();
+            off_chain_imt.insert_leaf_lazy(hash1(i)).unwrap();
         }
-        builder.build_tree();
+        off_chain_imt.build_tree();
 
         // build and check proof for each leaf
         for i in 1..=8 {
-            let proof = builder.merkle_proof(hash1(i)).unwrap();
+            let proof = off_chain_imt.merkle_proof(hash1(i)).unwrap();
             assert_eq!(proof.siblings_path.len(), 3);
             assert_eq!(proof.siblings_side.len(), 3);
 
-            assert!(builder.verify_merkle_proof(&proof), "proof mismatch for leaf {}", i);
+            assert!(off_chain_imt.verify_merkle_proof(&proof), "proof mismatch for leaf {}", i);
         }
     }
 }
@@ -366,22 +366,22 @@ mod capture {
         println!("Z1 = {:?}", zv[1]);
         println!("Z2 = {:?}", zv[2]);
 
-        let empty = OffChainImtBuilder::new(3);
+        let empty = OffChainImt::new(3);
         println!("EMPTY_ROOT = {:?}", empty.root());
 
-        let mut single = OffChainImtBuilder::new(3);
+        let mut single = OffChainImt::new(3);
         single.insert_leaf_lazy(hash1(1)).unwrap();
         single.build_tree();
         println!("SINGLE_ROOT = {:?}", single.root());
 
-        let mut partial = OffChainImtBuilder::new(3);
+        let mut partial = OffChainImt::new(3);
         for i in 1..=3 {
             partial.insert_leaf_lazy(hash1(i)).unwrap();
         }
         partial.build_tree();
         println!("PARTIAL3_ROOT = {:?}", partial.root());
 
-        let mut full = OffChainImtBuilder::new(3);
+        let mut full = OffChainImt::new(3);
         for i in 1..=8 {
             full.insert_leaf_lazy(hash1(i)).unwrap();
         }

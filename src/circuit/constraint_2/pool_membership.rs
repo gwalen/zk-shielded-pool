@@ -1,13 +1,10 @@
-use halo2_base::halo2_proofs::dev::VerifyFailure;
+use crate::circuit::constraint_2::off_chain_imt::MerkleProof;
+use crate::circuit::solana_poseidon_chip::SolanaPoseidonChip;
 use halo2_base::{
     AssignedValue, Context,
     gates::{GateChip, GateInstructions, circuit::builder::BaseCircuitBuilder},
-    halo2_proofs::{dev::MockProver, halo2curves::bn256::Fr},
+    halo2_proofs::halo2curves::bn256::Fr,
 };
-
-use crate::circuit::constraint_2::off_chain_imt::{MerkleProof, OffChainImtBuilder};
-use crate::circuit::solana_poseidon_chip::SolanaPoseidonChip;
-use crate::circuit::solana_poseidon_native;
 
 pub struct MerkleProofChip {
     gate: GateChip<Fr>,
@@ -66,7 +63,7 @@ impl MerkleProofChip {
  * let bytes = fr_to_le_bytes(tree_depth);            // [u8; 32], little-endian
  * let depth = u64::from_le_bytes(bytes[..8].try_into().unwrap()) as usize
  * and do:  for i in 0..depth {..}
- * 
+ *
  * Q2: can I invert the 0/1 value, basically get the result of !sibling_side[i] ?
  * -> Yes, using not gate:
  * let is_left = self.gate.not(ctx, siblings_side[i]);  // under the hood it simply returns:  1 - x
@@ -102,40 +99,46 @@ pub fn build_pool_membership_circuit(
     builder.assigned_instances[0].push(root_from_merkle_proof);
 }
 
-pub fn run_constraint_2_pool_membership_test_ok() -> Result<(), Vec<VerifyFailure>> {
-    let k: usize = 16;
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::circuit::{constraint_2::off_chain_imt::OffChainImt, solana_poseidon_native};
+    use halo2_base::halo2_proofs::dev::MockProver;
 
-    // Build IMT for testing
-    let imt_tree = create_test_imt_tree();
+    #[test]
+    fn test_pool_membership_ok() {
+        let k: usize = 16;
 
-    // --- private proof values
-    let merkle_proof = imt_tree.merkle_proof(solana_poseidon_native::hash1(5)).unwrap();
-    // ---
+        // Build IMT for testing
+        let imt_tree = create_test_imt_tree();
 
-    let expected_root = imt_tree.root();
+        // --- private proof values
+        let merkle_proof = imt_tree.merkle_proof(solana_poseidon_native::hash1(5)).unwrap();
+        // ---
 
-    let mut builder = BaseCircuitBuilder::<Fr>::new(false).use_k(k).use_instance_columns(1);
+        let expected_root = imt_tree.root();
 
-    build_pool_membership_circuit(&mut builder, merkle_proof);
-    builder.calculate_params(Some(9));
+        let mut builder = BaseCircuitBuilder::<Fr>::new(false).use_k(k).use_instance_columns(1);
 
-    let public_instances = vec![vec![expected_root]];
-    let verification_result =
-        MockProver::run(k as u32, &builder, public_instances).unwrap().verify();
+        build_pool_membership_circuit(&mut builder, merkle_proof);
+        builder.calculate_params(Some(9));
 
-    match &verification_result {
-        Ok(()) => println!("Merkle inclusion proof verification successful"),
-        Err(e) => println!("Merkle inclusion proof verification failed: {e:?}"),
+        let public_instances = vec![vec![expected_root]];
+        let verification_result =
+            MockProver::run(k as u32, &builder, public_instances).unwrap().verify();
+
+        match &verification_result {
+            Ok(()) => println!("Merkle inclusion proof verification successful"),
+            Err(e) => println!("Merkle inclusion proof verification failed: {e:?}"),
+        }
     }
 
-    verification_result
-}
-
-pub fn create_test_imt_tree() -> OffChainImtBuilder {
-    let mut builder = OffChainImtBuilder::new(3);
-    for i in 1..=8 {
-        builder.insert_leaf_lazy(solana_poseidon_native::hash1(i)).unwrap();
+    pub fn create_test_imt_tree() -> OffChainImt {
+        let mut off_chain_imt = OffChainImt::new(3);
+        for i in 1..=8 {
+            off_chain_imt.insert_leaf_lazy(solana_poseidon_native::hash1(i)).unwrap();
+        }
+        off_chain_imt.build_tree();
+        off_chain_imt
     }
-    builder.build_tree();
-    builder
 }
