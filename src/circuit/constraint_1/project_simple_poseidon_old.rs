@@ -8,7 +8,9 @@ use halo2_base::{
 use hex_literal::hex;
 use pse_poseidon::Poseidon;
 
-// *** Commitment reconstruction constraint ***
+// ********************************************************************************************************************
+// ********** THIS FILE IS LEFT TEMPORARILY FOR REFERENCE - PLEASE DO NOT REVIEW - WILL BE REMOVED IN FUTURE **********
+// ********************************************************************************************************************
 
 // Poseidon parameters (given by AI):
 //   T = 3       state width

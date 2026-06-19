@@ -10,6 +10,16 @@ use hex_literal::hex;
 
 pub const MAX_CHUNKS: usize = 3;
 
+/*
+TODO:
+
+1. Double hashing to prevent fake proof (with forged total_amount):
+H_user = Poseidon(s, 7.0, 2.0, 3.5, 1.5, A0, A1, A2, M=3)
+H = Poseidon(H_user, 7.0) -> calculated by program on-chain, a 7 to value taken directly from transaction
+
+2. Add range checks for chunks
+*/
+
 pub fn build_solana_poseidon_circuit(
     builder: &mut BaseCircuitBuilder<Fr>,
     s: Fr,
