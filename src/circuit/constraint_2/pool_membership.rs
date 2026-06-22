@@ -29,6 +29,7 @@ impl MerkleProofChip {
         let siblings_path_len = ctx.load_constant(Fr::from(siblings_path.len() as u64));
         let siblings_side_len = ctx.load_constant(Fr::from(siblings_side.len() as u64));
         // check if vectors are equal and have expected size
+        // TODO: in on-chain program add check that list size is equal to tree_depth
         ctx.constrain_equal(&siblings_path_len, &siblings_side_len);
 
         let mut current_node = leaf;
@@ -71,6 +72,7 @@ impl MerkleProofChip {
 
 pub fn build_pool_membership_circuit(
     builder: &mut BaseCircuitBuilder<Fr>,
+    // private witness(advice) values
     merkle_proof: MerkleProof,
 ) {
     let poseidon_chip = SolanaPoseidonChip::<2>::new();
