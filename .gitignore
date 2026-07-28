@@ -1,0 +1,7 @@
+.DS_Store
+
+# No submodules, do no link directly for now
+solana-verifier/
+zk-shielded-pool-circuit/
+	
+
