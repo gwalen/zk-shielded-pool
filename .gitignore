@@ -2,7 +2,6 @@
 
 # No submodules, do no link directly for now
 solana-verifier/
+solana-proof-generator/
 zk-shielded-pool-circuit/
-	
-
 zk-shielded-pool-solana/
