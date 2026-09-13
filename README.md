@@ -9,6 +9,8 @@ This differs from Tornado Cash Classic, which uses fixed deposit and withdrawal 
 This program uses **Anchor v2** and **`no_std` Rust**, which runs without Rust's standard library. 
 Proofs are generated off chain and checked by a separate on-chain verifier, so the full Halo2 proving library does not need to run on Solana.
 
+For the current test proof, on-chain verification uses **816,983 compute units (CU)**, within the **1.4 million CU** test budget. The proof is **1,088 bytes**, and its five public inputs total **160 bytes** (32 bytes each). These figures describe proof verification, not the complete withdrawal flow. See the [proof generator README](https://github.com/adamsmo/solana-proof-generator#readme) for artifact sizes and verification details.
+
 The project is under active development;
 
 ## Sub-projects
