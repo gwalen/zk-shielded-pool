@@ -2,7 +2,7 @@
 
 A Solana privacy pool that lets users **deposit SOL and withdraw it anonymously**, powered by **zero-knowledge (ZK) proofs**.
 
-Each deposit supports up to three different destination addresses and three withdrawal amounts, called chunks. The chunks must add up to the deposited amount, but users can choose to withdraw only some of them. For example, a 9 SOL deposit could contain chunks of 4 SOL, 4.999 SOL, and 0.001 SOL. The user could withdraw the first two and leave the small third chunk in the pool. Splitting withdrawals across addresses and leaving dust are making simple amount matching impossible even with small volume. 
+Each deposit supports up to three different destination addresses and three withdrawal amounts, called chunks. The chunks must add up to the deposited amount, but users can choose to withdraw only some of them. For example, a 9 SOL deposit could contain chunks of 4 SOL, 4.999 SOL, and 0.001 SOL. The user could withdraw the first two and leave the small third chunk in the pool. Splitting withdrawals across addresses and chunks are making simple amount matching impossible even with small volume. 
 
 - **Anchor v2** with `no_std` Rust for the Solana program.
 - **Halo2** for circuits written in Rust.
