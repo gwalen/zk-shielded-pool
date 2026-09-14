@@ -1,13 +1,14 @@
 # Umbrella project for ZK-shielded-pool-related projects
 
-An experimental shielded SOL pool on Solana built with Zero-knowledge proof verification. It is designed to let users deposit SOL and later withdraw it without revealing which deposit they are spending. A zero-knowledge proof checks that the user knows the deposit secret and that the withdrawal matches the amounts and destinations chosen when making the deposit.
+A Solana privacy pool that lets users **deposit SOL and withdraw it anonymously**, powered by **zero-knowledge (ZK) proofs**.
 
 Each deposit supports up to three different destination addresses and three withdrawal amounts, called chunks. The chunks must add up to the deposited amount, but users can choose to withdraw only some of them. For example, a 9 SOL deposit could contain chunks of 4 SOL, 4.999 SOL, and 0.001 SOL. The user could withdraw the first two and leave the small third chunk in the pool. Splitting withdrawals across addresses and leaving dust can make simple amount matching harder, although amounts and timing can still reveal connections. 
 
 ## Tech stack
 
-- Anchor v2 (no_std Rust)
-- Halo2 circuits
+- **Anchor v2** with `no_std` Rust for the Solana program.
+- **Halo2** for circuits written in Rust.
+- **BN254/KZG/GWC** for proofs: the BN254 curve, KZG polynomial commitments, and the GWC scheme for openings.
 
 This program uses **Anchor v2** and **`no_std` Rust**, which runs without Rust's standard library. 
 Proofs are generated off chain and checked by a separate on-chain verifier, so the full Halo2 proving library does not need to run on Solana.
@@ -32,8 +33,9 @@ The 816,983 CU figure above is for the complete proof-verification run, not a me
 
 ## Notes:
 
-This differs from Tornado Cash Classic, which uses fixed deposit and withdrawal amounts, including 0.1, 1, 10, and 100 ETH pools. This project's circuits use **Halo2 in Rust**, while Tornado Cash Classic uses [Circom](https://docs.tornado.cash/tornado-cash-classic/circuits). Rust was used here. 
-Inspected proof scheme: prover done with : BN254/KZG/GWC, tornado classic was using Groth16 over BN254.
+This project supports three withdrawal chunks with amounts chosen at deposit time. Tornado Cash Classic uses fixed deposit and withdrawal amounts, including 0.1, 1, 10, and 100 ETH pools.
+
+The circuits here are written in **Rust with Halo2**, and the prover uses **BN254/KZG/GWC**. Tornado Cash Classic uses [Circom circuits](https://docs.tornado.cash/tornado-cash-classic/circuits) and Groth16 proofs over BN254. Both use the same curve, but their circuit tools and proof schemes differ.
 
 **The project is under active development, and may contain bugs.**
 
