@@ -2,9 +2,7 @@
 
 A Solana privacy pool that lets users **deposit SOL and withdraw it anonymously**, powered by **zero-knowledge (ZK) proofs**.
 
-Each deposit supports up to three different destination addresses and three withdrawal amounts, called chunks. The chunks must add up to the deposited amount, but users can choose to withdraw only some of them. For example, a 9 SOL deposit could contain chunks of 4 SOL, 4.999 SOL, and 0.001 SOL. The user could withdraw the first two and leave the small third chunk in the pool. Splitting withdrawals across addresses and leaving dust can make simple amount matching harder, although amounts and timing can still reveal connections. 
-
-## Tech stack
+Each deposit supports up to three different destination addresses and three withdrawal amounts, called chunks. The chunks must add up to the deposited amount, but users can choose to withdraw only some of them. For example, a 9 SOL deposit could contain chunks of 4 SOL, 4.999 SOL, and 0.001 SOL. The user could withdraw the first two and leave the small third chunk in the pool. Splitting withdrawals across addresses and leaving dust are making simple amount matching impossible even with small volume. 
 
 - **Anchor v2** with `no_std` Rust for the Solana program.
 - **Halo2** for circuits written in Rust.
@@ -33,17 +31,13 @@ The 816,983 CU figure above is for the complete proof-verification run, not a me
 
 ## Notes:
 
-This project supports three withdrawal chunks with amounts chosen at deposit time. Tornado Cash Classic uses fixed deposit and withdrawal amounts, including 0.1, 1, 10, and 100 ETH pools.
-
-The circuits here are written in **Rust with Halo2**, and the prover uses **BN254/KZG/GWC**. Tornado Cash Classic uses [Circom circuits](https://docs.tornado.cash/tornado-cash-classic/circuits) and Groth16 proofs over BN254. Both use the same curve, but their circuit tools and proof schemes differ.
-
 **The project is under active development, and may contain bugs.**
 
 ## Sub-projects
 
 List of all sub-projects that together make up this ZK-shielded-pool project.
 
-1. [ZK-shielded-pool circuit](https://github.com/gwalen/zk-shielded-pool-circuit) — contains the circuit with tests in Halo2. Based on this circuit, we build the on-chain verifier and off-chain prover.
-2. [Solana-verifier](https://github.com/adamsmo/solana-proof-generator) — on-chain verifier code for ZK-shielded-pool, built by [adamsmo](https://github.com/adamsmo).
-3. [ZK-shielded-pool-solana](https://github.com/gwalen/zk-shielded-pool-solana) — contains the Solana program code for ZK-shielded-pool. It handles deposits/withdrawals and calls the verifier.
+1. [ZK-shielded-pool-solana](https://github.com/gwalen/zk-shielded-pool-solana) — contains the Solana program code for ZK-shielded-pool. It handles deposits/withdrawals and calls the verifier.
+2. [ZK-shielded-pool circuit](https://github.com/gwalen/zk-shielded-pool-circuit) — contains the circuit with tests in Halo2. Based on this circuit, we build the on-chain verifier and off-chain prover.
+3. [Solana-verifier](https://github.com/adamsmo/solana-proof-generator) — on-chain verifier code for ZK-shielded-pool, built by [adamsmo](https://github.com/adamsmo).
 4. ZK-shielded-pool-client — contains the client code for ZK-shielded-pool. It is a Rust backend server app for interacting with the Solana program: sending deposit/withdrawal transactions and building proofs for the verifier. For educational purposes, it must be run locally with a private key set in an environment variable. In future versions, this will be replaced by a web app with WASM code.
