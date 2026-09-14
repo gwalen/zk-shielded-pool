@@ -9,3 +9,5 @@ pool-anchor-v2-rewrite/
 
 
 *.code-workspace
+
+.claude
