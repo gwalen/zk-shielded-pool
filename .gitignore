@@ -6,6 +6,7 @@ solana-proof-generator/
 zk-shielded-pool-circuit/
 zk-shielded-pool-solana/
 pool-anchor-v2-rewrite/
+zk-shielded-pool-client/
 
 
 *.code-workspace
